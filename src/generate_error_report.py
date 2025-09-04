@@ -26,7 +26,7 @@ def fetch_crossref_emails():
         sys.exit(1)
 
     try:
-        print("Connecting to email server...")
+        print("Connecting to Thoth email server...")
         mail = imaplib.IMAP4_SSL(imap_server)
         mail.login(username, password)
 
@@ -36,7 +36,7 @@ def fetch_crossref_emails():
             print(f"Failed to select folder: {status}")
             return False
 
-        print(f"Crossref submissions folder contains {int(messages[0])} messages")
+        print(f"Crossref Error Reports folder contains {int(messages[0])} messages")
 
         # Search for all messages
         status, message_ids = mail.search(None, 'ALL')
@@ -57,7 +57,7 @@ def fetch_crossref_emails():
                 process_crossref_email(email_message)
                 print("---")
 
-                # Move the email to Checked subfolder
+                # TODO: Find out if Hannah wants messages moved to another folder
                 # result = mail.copy(msg_id, 'INBOX/Crossref_submissions/Checked')
                 # if result[0] == 'OK':
                 #     mail.store(msg_id, '+FLAGS', '\\Deleted')
@@ -91,26 +91,20 @@ def process_crossref_email(email_message):
         return
 
     submission_id = bodyxml.findtext('.//submission_id')
-    print(f"  -> Submission ID: {submission_id}")
+    print(f"  -> Crossref Submission ID: {submission_id}")
 
     batch_id = bodyxml.findtext('.//batch_id')
-    print(f"  -> Batch ID: {batch_id}")
 
     # Extract Thoth Work ID from batch_id
     thoth_work_id = None
     if batch_id and '_' in batch_id:
         thoth_work_id = batch_id.split('_')[0]
         thoth_work_id_url = f"https://thoth.pub/books/{thoth_work_id}"
-        print(f"  -> Thoth Work ID URL: {thoth_work_id_url}")
 
     diagnostic = bodyxml.find('.//record_diagnostic')
-
+    
     msg_id = diagnostic.attrib.get('msg_id')
-    if msg_id:
-        print(f"  -> Error msg_id: {msg_id}")
     msg = diagnostic.find('msg')
-    if msg is not None:
-        print(f"  -> Error: {msg.text}")
     # GraphQL query for Thoth API
     query = '{ work(workId: "%s") { doi fullTitle } }' % thoth_work_id
     response = requests.post(
@@ -122,8 +116,7 @@ def process_crossref_email(email_message):
         work = data.get('data', {}).get('work', {})
         doi = work.get('doi')
         title = work.get('fullTitle')
-        print(f"  -> Thoth canonical DOI: {doi}")
-        print(f"  -> Thoth title: {title}")
+        print(f"  -> Thoth DOI retrieved from API: {doi}")
     else:
         print(f"  -> Thoth API error: {response.status_code}")
 
@@ -132,7 +125,7 @@ def process_crossref_email(email_message):
     row = {
         'submission_id': submission_id,
         'batch_id': batch_id,
-        'thoth_record_url': thoth_work_id_url if batch_id and '_' in batch_id else None,
+        'thoth_record_url': thoth_work_id_url if thoth_work_id else None,
         'work_title': title if 'title' in locals() else None,
         'doi': doi if 'doi' in locals() else None,
         'crossref_error_msg_id': msg_id,
@@ -147,7 +140,7 @@ def process_crossref_email(email_message):
 
 
 if __name__ == "__main__":
-    print("Starting Crossref email fetch...")
+    print("Starting Crossref error email fetch...")
     success = fetch_crossref_emails()
     if success:
         print("Email fetch completed successfully")
