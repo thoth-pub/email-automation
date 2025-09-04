@@ -24,3 +24,19 @@ jobs:
           IMAP_USERNAME: ${{ secrets.IMAP_USERNAME }}
           IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
         run: python src/generate_error_report.py
+
+      - name: Upload error report CSV as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crossref-error-report
+          path: crossref_error_report.csv
+
+      - name: Send email to Crossref
+        uses: dawidd6/action-send-mail@v3
+        with:
+          connection_url: ${{ secrets.THOTH_SMTP }}
+          subject: Crossref submission error reports from Thoth
+          to: ${{ secrets.CROSSREF_EMAIL }}
+          from: Thoth Open Metadata <info@thoth.pub>
+          body: Crossref errors are contained as an attached CSV
+          attachments: crossref_error_report.csv
