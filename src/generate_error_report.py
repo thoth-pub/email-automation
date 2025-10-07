@@ -11,6 +11,11 @@ import pandas as pd
 # Load environment variables from config.env
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../config.env'))
 
+# TODO:
+# Separate the logic for getting the messages vs parsing the messages, for MUSE stuff in the future
+# Read from email, send from email separate classes for these parts of the logic
+# do the send email logic in Python, rather than in the yml
+
 
 def fetch_crossref_emails():
     """Fetch messages from Inbox.Crossref_submissions via IMAP"""
