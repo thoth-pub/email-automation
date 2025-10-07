@@ -12,6 +12,8 @@ import logging
 # Load environment variables from config.env
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../config.env'))
 
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
 # TODO:
 # Separate the logic for getting the messages vs parsing the messages, for MUSE stuff in the future
 # Read from email, send from email separate classes for these parts of the logic
