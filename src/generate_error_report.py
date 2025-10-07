@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 import requests
 import pandas as pd
+import logging
 
 # Load environment variables from config.env
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../config.env'))
@@ -26,59 +27,64 @@ def fetch_crossref_emails():
     password = os.environ.get('IMAP_PASSWORD')
 
     if not all([imap_server, username, password]):
-        print("Error: Missing required environment variables")
-        print("Required: IMAP_SERVER, IMAP_USERNAME, IMAP_PASSWORD")
+        logging.error("Missing one or more required repository secrets: "
+                      "IMAP_SERVER, IMAP_USERNAME, IMAP_PASSWORD")
         sys.exit(1)
 
     try:
-        print("Connecting to Thoth email server...")
+        logging.info("Connecting to Thoth email server...")
         mail = imaplib.IMAP4_SSL(imap_server)
         mail.login(username, password)
 
-        # Select the Crossref_submissions folder
-        status, messages = mail.select('INBOX/Crossref_submissions/Error_reports')
-        if status != 'OK':
-            print(f"Failed to select folder: {status}")
-            return False
+        for folder in ["ISBN_already_assigned", "ISSN_already_assigned"]:
+            logging.info(f"reading emails in Crossref_submissions/Error_reports/{folder} folder")
+            # Select the Crossref_submissions/Error_reports/{folder} folder
+            status, messages = mail.select(f'INBOX/Crossref_submissions/Error_reports/{folder}')
+            if status != 'OK':
+                logging.error(f"Failed to select folder: {status}")
+                return False
 
-        print(f"Crossref Error Reports folder contains {int(messages[0])} messages")
+            logging.info(
+                f"Crossref_Submissions/Error_reports/{folder} folder contains "
+                f"{int(messages[0])} messages"
+            )
 
-        # Search for all messages
-        status, message_ids = mail.search(None, 'ALL')
-        if status != 'OK':
-            print("Failed to search messages")
-            return False
+            # Search for all messages
+            status, message_ids = mail.search(None, 'ALL')
+            if status != 'OK':
+                logging.error("Failed to return messages from folder")
+                return False
 
-        message_id_list = message_ids[0].split()
+            message_id_list = message_ids[0].split()
 
-        # Process each message
-        for msg_id in message_id_list:
-            status, msg_data = mail.fetch(msg_id, '(RFC822)')
-            if status == 'OK':
-                email_body = msg_data[0][1]
-                email_message = email.message_from_bytes(email_body)
+            # Process each message
+            for msg_id in message_id_list:
+                status, msg_data = mail.fetch(msg_id, '(RFC822)')
+                if status == 'OK':
+                    email_body = msg_data[0][1]
+                    email_message = email.message_from_bytes(email_body)
 
-                # Process email content
-                process_crossref_email(email_message)
-                print("---")
+                    # Process email content
+                    process_crossref_email(email_message)
+                    logging.info("---")
 
-                # TODO: Find out if Hannah wants messages moved to another folder
-                # result = mail.copy(msg_id, 'INBOX/Crossref_submissions/Checked')
-                # if result[0] == 'OK':
-                #     mail.store(msg_id, '+FLAGS', '\\Deleted')
-                #     mail.expunge()
-                #     print(f"Message {msg_id.decode()} moved to Checked folder.")
-                # else:
-                #     print(f"Failed to move message {msg_id.decode()} to Checked folder.")
+                    # TODO: Find out if Hannah wants messages moved to another folder
+                    # result = mail.copy(msg_id, 'INBOX/Crossref_submissions/Checked')
+                    # if result[0] == 'OK':
+                    #     mail.store(msg_id, '+FLAGS', '\\Deleted')
+                    #     mail.expunge()
+                    #     print(f"Message {msg_id.decode()} moved to Checked folder.")
+                    # else:
+                    #     print(f"Failed to move message {msg_id.decode()} to Checked folder.")
 
         # Close connection
         mail.close()
         mail.logout()
-        print("IMAP connection closed successfully")
+        logging.info("IMAP connection closed successfully")
         return True
 
     except Exception as e:
-        print(f"Error: {e}")
+        logging.error(f"Error: {e}")
         return False
 
 
@@ -92,11 +98,11 @@ def process_crossref_email(email_message):
     try:
         bodyxml = ET.fromstring(body)
     except Exception as e:
-        print(f"  -> Failed to parse XML: {e}")
+        logging.error(f"  -> Failed to parse XML: {e}")
         return
 
     submission_id = bodyxml.findtext('.//submission_id')
-    print(f"  -> Crossref Submission ID: {submission_id}")
+    logging.info(f"  -> Crossref Submission ID: {submission_id}")
 
     batch_id = bodyxml.findtext('.//batch_id')
 
@@ -121,9 +127,9 @@ def process_crossref_email(email_message):
         work = data.get('data', {}).get('work', {})
         doi = work.get('doi')
         title = work.get('fullTitle')
-        print(f"  -> Thoth DOI retrieved from API: {doi}")
+        logging.info(f"  -> Thoth DOI retrieved from API: {doi}")
     else:
-        print(f"  -> Thoth API error: {response.status_code}")
+        logging.error(f"  -> Thoth API error: {response.status_code}")
 
     # Write data to a CSV
     csv_path = 'crossref_error_report.csv'
@@ -145,11 +151,11 @@ def process_crossref_email(email_message):
 
 
 if __name__ == "__main__":
-    print("Starting Crossref error email fetch...")
+    logging.info("Starting Crossref error email fetch...")
     success = fetch_crossref_emails()
     if success:
-        print("Email fetch completed successfully")
+        logging.info("Email fetch completed successfully")
         sys.exit(0)
     else:
-        print("Email fetch failed")
+        logging.error("Email fetch failed")
         sys.exit(1)
