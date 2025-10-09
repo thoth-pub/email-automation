@@ -10,10 +10,10 @@ import pandas as pd
 import logging
 from typing import List, Dict, Any, Optional
 
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
 # Load environment variables from config.env
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../config.env'))
-
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 
 class EmailFetcher:
@@ -43,7 +43,42 @@ class EmailFetcher:
             self.mail.logout()
             logging.info("IMAP connection closed successfully")
 
-    def fetch_messages_from_folders(self, folders: List[str]) -> List[email.message.EmailMessage]:
+    def move_message(self, msg_id: str, source_folder: str,
+                     destination_folder: str) -> bool:
+        """Move a message from source folder to destination folder"""
+        try:
+            # Select the source folder
+            status, _ = self.mail.select(source_folder)
+            if status != 'OK':
+                logging.error(f"Failed to select source folder "
+                              f"{source_folder}")
+                return False
+
+            # Copy message to destination folder
+            status, _ = self.mail.copy(msg_id, destination_folder)
+            if status != 'OK':
+                logging.error(f"Failed to copy message {msg_id} to "
+                              f"{destination_folder}")
+                return False
+
+            # Mark original message for deletion
+            status, _ = self.mail.store(msg_id, '+FLAGS', '\\Deleted')
+            if status != 'OK':
+                logging.error(f"Failed to mark message {msg_id} for deletion")
+                return False
+
+            # Expunge to actually delete the message from source folder
+            self.mail.expunge()
+            
+            logging.info(f"Moved message {msg_id} from {source_folder} to "
+                         f"{destination_folder}")
+            return True
+
+        except Exception as e:
+            logging.error(f"Error moving message {msg_id}: {e}")
+            return False
+
+    def fetch_messages_from_folders(self, folders: List[str]) -> List[tuple]:
         """Fetch all messages from specified folders"""
         all_messages = []
 
@@ -53,7 +88,7 @@ class EmailFetcher:
 
         return all_messages
 
-    def fetch_messages_from_folder(self, folder: str) -> List[email.message.EmailMessage]:
+    def fetch_messages_from_folder(self, folder: str) -> List[tuple]:
         """Fetch all messages from a single folder"""
         messages = []
 
@@ -81,7 +116,8 @@ class EmailFetcher:
             if status == 'OK':
                 email_body = msg_data[0][1]
                 email_message = email.message_from_bytes(email_body)
-                messages.append(email_message)
+                # Return tuple: (email_message, msg_id, folder)
+                messages.append((email_message, msg_id.decode(), folder))
 
         return messages
 
@@ -105,7 +141,7 @@ class CrossrefParser:
             logging.error(f"Failed to parse XML: {e}")
             return None
 
-        # Extract basic data
+        # Extract relevant submission metadata from email body
         submission_id = bodyxml.findtext('.//submission_id')
         batch_id = bodyxml.findtext('.//batch_id')
 
@@ -118,7 +154,7 @@ class CrossrefParser:
             thoth_work_id = batch_id.split('_')[0]
             thoth_work_id_url = f"https://thoth.pub/books/{thoth_work_id}"
 
-        # Extract diagnostic information
+        # Extract diagnostic error information
         diagnostic = bodyxml.find('.//record_diagnostic')
         msg_id = diagnostic.attrib.get('msg_id') if diagnostic is not None else None
         msg = diagnostic.find('msg') if diagnostic is not None else None
@@ -177,8 +213,9 @@ class CSVWriter:
         df.to_csv(self.csv_path, index=False)
 
 
-def fetch_crossref_emails():
-    """Main function using the refactored classes"""
+def fetch_parse_crossref_emails():
+    """Main function to fetch and parse Crossref error emails"""
+
     # Get environment variables
     imap_server = os.environ.get('IMAP_SERVER')
     username = os.environ.get('IMAP_USERNAME')
@@ -190,30 +227,39 @@ def fetch_crossref_emails():
         sys.exit(1)
 
     # Initialize components
-    fetcher = EmailFetcher(imap_server, username, password)
+    email_fetcher = EmailFetcher(imap_server, username, password)
     parser = CrossrefParser()
     csv_writer = CSVWriter()
 
     try:
         # Connect to email server
-        if not fetcher.connect():
+        if not email_fetcher.connect():
             return False
 
-        # Define folders to check
+        # Folders in inbox to check
         folders = [
             'INBOX/Crossref_submissions/Error_reports/ISBN_already_assigned',
             'INBOX/Crossref_submissions/Error_reports/ISSN_already_assigned'
         ]
 
         # Fetch all messages
-        messages = fetcher.fetch_messages_from_folders(folders)
+        messages = email_fetcher.fetch_messages_from_folders(folders)
         logging.info(f"Total messages fetched: {len(messages)}")
 
+        # Destination folder for processed emails
+        checked_folder = 'INBOX/Crossref_submissions/Checked'
+
         # Process each message
-        for email_message in messages:
+        for email_message, msg_id, source_folder in messages:
             parsed_data = parser.parse_message(email_message)
             if parsed_data:
                 csv_writer.write_row(parsed_data)
+                # Move email to checked folder after successful processing
+                email_fetcher.move_message(msg_id, source_folder,
+                                           checked_folder)
+            else:
+                logging.warning(f"Failed to parse message {msg_id}, "
+                                f"leaving in {source_folder}")
             logging.info("---")
 
         return True
@@ -222,12 +268,12 @@ def fetch_crossref_emails():
         logging.error(f"Error: {e}")
         return False
     finally:
-        fetcher.disconnect()
+        email_fetcher.disconnect()
 
 
 if __name__ == "__main__":
     logging.info("Starting Crossref error email fetch and processing...")
-    success = fetch_crossref_emails()
+    success = fetch_parse_crossref_emails()
     if success:
         logging.info("Email fetch and processing completed successfully")
         sys.exit(0)
