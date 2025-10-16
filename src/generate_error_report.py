@@ -15,10 +15,54 @@ import smtplib
 from email import encoders
 from typing import List, Dict, Any, Optional
 
+
+class Config:
+    """Configuration management for the application"""
+
+    def __init__(self):
+        # Load environment variables from config.env
+        load_dotenv(dotenv_path=os.path.join(
+            os.path.dirname(__file__), '../config.env'))
+
+        # IMAP settings
+        self.imap_server = os.environ.get('IMAP_SERVER')
+        self.imap_username = os.environ.get('IMAP_USERNAME')
+        self.imap_password = os.environ.get('IMAP_PASSWORD')
+
+        # SMTP settings
+        self.smtp_url = os.environ.get('THOTH_SMTP')
+        self.recipient_email = os.environ.get('CROSSREF_EMAIL')
+
+        # Email folders
+        self.source_folders = [
+            'INBOX/Crossref_submissions/Error_reports/ISBN_already_assigned',
+            'INBOX/Crossref_submissions/Error_reports/ISSN_already_assigned'
+        ]
+        self.checked_folder = 'INBOX/Crossref_submissions/Checked'
+
+        # Validate required settings
+        self._validate()
+
+    def _validate(self):
+        """Validate that required configuration is present"""
+        if not all([self.imap_server, self.imap_username, self.imap_password]):
+            raise ValueError(
+                "Missing required IMAP configuration: "
+                "IMAP_SERVER, IMAP_USERNAME, IMAP_PASSWORD")
+
+
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-# Load environment variables from config.env
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../config.env'))
+
+# General constants
+DEFAULT_THOTH_API_URL = 'https://api.thoth.pub/graphql'
+DEFAULT_SMTP_PORT = 587
+EMAIL_SENDER = "Thoth Open Metadata <info@thoth.pub>"
+
+# Crossref-specific constants
+CROSSREF_CSV_FILENAME = 'crossref_error_report.csv'
+CROSSREF_EMAIL_SUBJECT = "Crossref submission error reports from Thoth"
+CROSSREF_EMAIL_BODY = "Crossref errors are contained as an attached CSV"
 
 
 class EmailFetcher:
@@ -56,9 +100,6 @@ class EmailFetcher:
     def move_message(self, msg_uid: str, source_folder: str,
                      destination_folder: str) -> bool:
         """Move a message from source folder to destination folder using UID
-        
-        Uses IMAP UIDs instead of sequence numbers to ensure message
-        identifiers remain stable even after expunge operations.
         """
         try:
             # Select the source folder
@@ -83,7 +124,7 @@ class EmailFetcher:
 
             # Expunge to actually delete the message from source folder
             self.mail.expunge()
-            
+
             logging.info(f"Moved message {msg_uid} from {source_folder} to "
                          f"{destination_folder}")
             return True
@@ -139,10 +180,11 @@ class EmailFetcher:
 class CrossrefParser:
     """Crossref-specific logic for parsing emailed error messages"""
 
-    def __init__(self, thoth_api_url: str = 'https://api.thoth.pub/graphql'):
+    def __init__(self, thoth_api_url: str = DEFAULT_THOTH_API_URL):
         self.thoth_api_url = thoth_api_url
 
-    def parse_message(self, email_message: email.message.EmailMessage) -> Optional[Dict[str, Any]]:
+    def parse_message(self, email_message: email.message.EmailMessage
+                      ) -> Optional[Dict[str, Any]]:
         """Parse a single Crossref email message and return extracted data"""
 
         # Extract message body
@@ -170,7 +212,8 @@ class CrossrefParser:
 
         # Extract diagnostic error information
         diagnostic = bodyxml.find('.//record_diagnostic')
-        msg_id = diagnostic.attrib.get('msg_id') if diagnostic is not None else None
+        msg_id = (diagnostic.attrib.get('msg_id')
+                  if diagnostic is not None else None)
         msg = diagnostic.find('msg') if diagnostic is not None else None
 
         # Enrich with Thoth API data
@@ -186,7 +229,8 @@ class CrossrefParser:
             'crossref_error_message': msg.text if msg is not None else None
         }
 
-    def _fetch_thoth_data(self, thoth_work_id: str) -> tuple[Optional[str], Optional[str]]:
+    def _fetch_thoth_data(self, thoth_work_id: str
+                          ) -> tuple[Optional[str], Optional[str]]:
         """Fetch DOI and title from Thoth API"""
         if not thoth_work_id:
             return None, None
@@ -213,7 +257,7 @@ class CrossrefParser:
 class CSVWriter:
     """Handles CSV file operations"""
 
-    def __init__(self, csv_path: str = 'crossref_error_report.csv'):
+    def __init__(self, csv_path: str = CROSSREF_CSV_FILENAME):
         self.csv_path = csv_path
 
     def write_row(self, row_data: Dict[str, Any]):
@@ -244,7 +288,7 @@ class EmailSender:
         try:
             logging.info(f"Attempting to send email via {self.smtp_server}:"
                          f"{self.smtp_port}")
-            
+
             # Create message
             msg = email.mime.multipart.MIMEMultipart()
             msg['From'] = sender
@@ -278,7 +322,7 @@ class EmailSender:
                 server.starttls()  # Upgrade to TLS
                 server.login(self.username, self.password)
                 server.send_message(msg)
-                
+
             logging.info(f"Email sent successfully to {recipient}")
             return True
 
@@ -290,115 +334,118 @@ class EmailSender:
 def parse_smtp_url(smtp_url: str) -> tuple[str, int, str, str]:
     """Parse SMTP URL format: smtp://username:password@server:port"""
     from urllib.parse import urlparse
-    
+
     parsed = urlparse(smtp_url)
     server = parsed.hostname
-    port = parsed.port or 587  # Always default to 587
+    port = parsed.port or DEFAULT_SMTP_PORT
     username = parsed.username
     password = parsed.password
-    
+
     return server, port, username, password
+
+
+class CrossrefEmailProcessor:
+    """Main application class for processing Crossref error emails"""
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.email_fetcher = EmailFetcher(
+            config.imap_server,
+            config.imap_username,
+            config.imap_password
+        )
+        self.parser = CrossrefParser()
+        self.csv_writer = CSVWriter()
+
+    def process_emails(self) -> bool:
+        """Main processing workflow"""
+        try:
+            # Connect to email server
+            if not self.email_fetcher.connect():
+                return False
+
+            # Fetch and process messages
+            messages = self.email_fetcher.fetch_messages_from_folders(
+                self.config.source_folders)
+            logging.info(f"Total messages fetched: {len(messages)}")
+
+            # Process each message
+            for email_message, msg_uid, source_folder in messages:
+                parsed_data = self.parser.parse_message(email_message)
+                if parsed_data:
+                    self.csv_writer.write_row(parsed_data)
+                    # Move email to checked folder after successful processing
+                    self.email_fetcher.move_message(
+                        msg_uid, source_folder, self.config.checked_folder)
+                else:
+                    logging.warning(f"Failed to parse message {msg_uid}, "
+                                    f"leaving in {source_folder}")
+                logging.info("---")
+
+            # Send email report if messages were processed
+            if messages:
+                self._send_report()
+            else:
+                logging.info("No messages processed, skipping email")
+
+            return True
+
+        except Exception as e:
+            logging.error(f"Error during processing: {e}")
+            return False
+        finally:
+            self.email_fetcher.disconnect()
+
+    def _send_report(self):
+        """Send email report with CSV attachment"""
+        if not (self.config.smtp_url and self.config.recipient_email):
+            logging.info("SMTP credentials not provided, skipping email")
+            return
+
+        try:
+            server, port, smtp_user, smtp_pass = parse_smtp_url(
+                self.config.smtp_url)
+            email_sender = EmailSender(server, port, smtp_user, smtp_pass)
+
+            success = email_sender.send_email_with_attachment(
+                recipient=self.config.recipient_email,
+                subject=CROSSREF_EMAIL_SUBJECT,
+                body=CROSSREF_EMAIL_BODY,
+                sender=EMAIL_SENDER,
+                attachment_path=self.csv_writer.csv_path
+            )
+
+            if success:
+                logging.info("Email report sent successfully")
+            else:
+                logging.warning("Failed to send email report")
+
+        except Exception as e:
+            logging.error(f"Error sending email: {e}")
 
 
 def fetch_parse_crossref_emails():
     """Main function to fetch and parse Crossref error emails"""
-
-    # Get environment variables
-    imap_server = os.environ.get('IMAP_SERVER')
-    username = os.environ.get('IMAP_USERNAME')
-    password = os.environ.get('IMAP_PASSWORD')
-
-    if not all([imap_server, username, password]):
-        logging.error("Missing one or more required repository secrets: "
-                      "IMAP_SERVER, IMAP_USERNAME, IMAP_PASSWORD")
-        sys.exit(1)
-
-    # Initialize components
-    email_fetcher = EmailFetcher(imap_server, username, password)
-    parser = CrossrefParser()
-    csv_writer = CSVWriter()
-
     try:
-        # Connect to email server
-        if not email_fetcher.connect():
-            return False
-
-        # Folders in inbox to check
-        folders = [
-            'INBOX/Crossref_submissions/Error_reports/ISBN_already_assigned',
-            'INBOX/Crossref_submissions/Error_reports/ISSN_already_assigned'
-        ]
-
-        # Fetch all messages
-        messages = email_fetcher.fetch_messages_from_folders(folders)
-        logging.info(f"Total messages fetched: {len(messages)}")
-
-        # Destination folder for processed emails
-        checked_folder = 'INBOX/Crossref_submissions/Checked'
-
-        # Process each message
-        for email_message, msg_uid, source_folder in messages:
-            parsed_data = parser.parse_message(email_message)
-            if parsed_data:
-                csv_writer.write_row(parsed_data)
-                # Move email to checked folder after successful processing
-                email_fetcher.move_message(msg_uid, source_folder,
-                                           checked_folder)
-            else:
-                logging.warning(f"Failed to parse message {msg_uid}, "
-                                f"leaving in {source_folder}")
-            logging.info("---")
-
-        # Send email with CSV report if we processed any messages
-        if len(messages) > 0:
-            smtp_url = os.environ.get('THOTH_SMTP')
-            recipient_email = os.environ.get('CROSSREF_EMAIL')
-            
-            if smtp_url and recipient_email:
-                try:
-                    server, port, smtp_user, smtp_pass = parse_smtp_url(
-                        smtp_url)
-                    email_sender = EmailSender(server, port, smtp_user,
-                                               smtp_pass)
-                    
-                    success = email_sender.send_email_with_attachment(
-                        recipient=recipient_email,
-                        subject="Crossref submission error reports from Thoth",
-                        body="Crossref errors are contained as an "
-                             "attached CSV",
-                        sender="Thoth Open Metadata <info@thoth.pub>",
-                        attachment_path=csv_writer.csv_path
-                    )
-                    
-                    if success:
-                        logging.info("Email report sent successfully")
-                    else:
-                        logging.warning("Failed to send email report")
-                        
-                except Exception as e:
-                    logging.error(f"Error sending email: {e}")
-            else:
-                logging.info("SMTP credentials not provided, skipping email")
-        else:
-            logging.info("No messages processed, skipping email")
-
-        return True
-
-    except Exception as e:
-        logging.error(f"Error: {e}")
+        config = Config()
+        processor = CrossrefEmailProcessor(config)
+        return processor.process_emails()
+    except ValueError as e:
+        logging.error(f"Configuration error: {e}")
         return False
-    finally:
-        email_fetcher.disconnect()
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return False
 
 
 if __name__ == "__main__":
     logging.info("Starting Crossref error email fetch and processing...")
     success = fetch_parse_crossref_emails()
-    
+
     # Force flush all outputs
     sys.stdout.flush()
     sys.stderr.flush()
-    
+
     if success:
         logging.info("Email fetch and processing completed successfully")
         logging.info("Script terminating with success code")
