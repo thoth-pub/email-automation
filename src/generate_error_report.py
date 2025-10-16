@@ -242,6 +242,9 @@ class EmailSender:
                                    attachment_path: str) -> bool:
         """Send email with CSV attachment"""
         try:
+            logging.info(f"Attempting to send email via {self.smtp_server}:"
+                         f"{self.smtp_port}")
+            
             # Create message
             msg = email.mime.multipart.MIMEMultipart()
             msg['From'] = sender
@@ -269,8 +272,10 @@ class EmailSender:
                 logging.warning(f"Attachment file not found: "
                                 f"{attachment_path}")
 
-            # Send email
-            with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port) as server:
+            # Send email using SMTP with STARTTLS (port 587)
+            logging.info(f"Sending email via {self.smtp_server}:587")
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()  # Upgrade to TLS
                 server.login(self.username, self.password)
                 server.send_message(msg)
                 
@@ -288,7 +293,7 @@ def parse_smtp_url(smtp_url: str) -> tuple[str, int, str, str]:
     
     parsed = urlparse(smtp_url)
     server = parsed.hostname
-    port = parsed.port or 465  # Default to 465 for SMTP_SSL
+    port = parsed.port or 587  # Always default to 587
     username = parsed.username
     password = parsed.password
     
