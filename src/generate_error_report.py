@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 import imaplib
 import email
+import email.mime.text
+import email.mime.multipart
+import email.mime.base
 import os
 import sys
 import xml.etree.ElementTree as ET
@@ -8,6 +11,8 @@ from dotenv import load_dotenv
 import requests
 import pandas as pd
 import logging
+import smtplib
+from email import encoders
 from typing import List, Dict, Any, Optional
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -39,13 +44,22 @@ class EmailFetcher:
     def disconnect(self):
         """Close IMAP connection"""
         if self.mail:
-            self.mail.close()
-            self.mail.logout()
-            logging.info("IMAP connection closed successfully")
+            try:
+                self.mail.close()
+                self.mail.logout()
+                logging.info("IMAP connection closed successfully")
+            except Exception as e:
+                logging.warning(f"Error during IMAP disconnect: {e}")
+            finally:
+                self.mail = None
 
-    def move_message(self, msg_id: str, source_folder: str,
+    def move_message(self, msg_uid: str, source_folder: str,
                      destination_folder: str) -> bool:
-        """Move a message from source folder to destination folder"""
+        """Move a message from source folder to destination folder using UID
+        
+        Uses IMAP UIDs instead of sequence numbers to ensure message
+        identifiers remain stable even after expunge operations.
+        """
         try:
             # Select the source folder
             status, _ = self.mail.select(source_folder)
@@ -54,28 +68,28 @@ class EmailFetcher:
                               f"{source_folder}")
                 return False
 
-            # Copy message to destination folder
-            status, _ = self.mail.copy(msg_id, destination_folder)
+            # Copy message to destination folder using UID
+            status, _ = self.mail.uid('copy', msg_uid, destination_folder)
             if status != 'OK':
-                logging.error(f"Failed to copy message {msg_id} to "
+                logging.error(f"Failed to copy message {msg_uid} to "
                               f"{destination_folder}")
                 return False
 
-            # Mark original message for deletion
-            status, _ = self.mail.store(msg_id, '+FLAGS', '\\Deleted')
+            # Mark original message for deletion using UID
+            status, _ = self.mail.uid('store', msg_uid, '+FLAGS', '\\Deleted')
             if status != 'OK':
-                logging.error(f"Failed to mark message {msg_id} for deletion")
+                logging.error(f"Failed to mark message {msg_uid} for deletion")
                 return False
 
             # Expunge to actually delete the message from source folder
             self.mail.expunge()
             
-            logging.info(f"Moved message {msg_id} from {source_folder} to "
+            logging.info(f"Moved message {msg_uid} from {source_folder} to "
                          f"{destination_folder}")
             return True
 
         except Exception as e:
-            logging.error(f"Error moving message {msg_id}: {e}")
+            logging.error(f"Error moving message {msg_uid}: {e}")
             return False
 
     def fetch_messages_from_folders(self, folders: List[str]) -> List[tuple]:
@@ -102,22 +116,22 @@ class EmailFetcher:
 
         logging.info(f"{folder} contains {int(folder_messages[0])} messages")
 
-        # Search for all messages
-        status, message_ids = self.mail.search(None, 'ALL')
+        # Search for all messages using UID
+        status, message_uids = self.mail.uid('search', None, 'ALL')
         if status != 'OK':
             logging.error(f"Failed to search messages in {folder}")
             return messages
 
-        message_id_list = message_ids[0].split()
+        message_uid_list = message_uids[0].split()
 
-        # Fetch each message
-        for msg_id in message_id_list:
-            status, msg_data = self.mail.fetch(msg_id, '(RFC822)')
+        # Fetch each message using UID
+        for msg_uid in message_uid_list:
+            status, msg_data = self.mail.uid('fetch', msg_uid, '(RFC822)')
             if status == 'OK':
                 email_body = msg_data[0][1]
                 email_message = email.message_from_bytes(email_body)
-                # Return tuple: (email_message, msg_id, folder)
-                messages.append((email_message, msg_id.decode(), folder))
+                # Return tuple: (email_message, msg_uid, folder)
+                messages.append((email_message, msg_uid.decode(), folder))
 
         return messages
 
@@ -213,6 +227,74 @@ class CSVWriter:
         df.to_csv(self.csv_path, index=False)
 
 
+class EmailSender:
+    """Handles SMTP email operations"""
+
+    def __init__(self, smtp_server: str, smtp_port: int, username: str,
+                 password: str):
+        self.smtp_server = smtp_server
+        self.smtp_port = smtp_port
+        self.username = username
+        self.password = password
+
+    def send_email_with_attachment(self, recipient: str, subject: str,
+                                   body: str, sender: str,
+                                   attachment_path: str) -> bool:
+        """Send email with CSV attachment"""
+        try:
+            # Create message
+            msg = email.mime.multipart.MIMEMultipart()
+            msg['From'] = sender
+            msg['To'] = recipient
+            msg['Subject'] = subject
+
+            # Add body
+            msg.attach(email.mime.text.MIMEText(body, 'plain'))
+
+            # Add attachment
+            if os.path.exists(attachment_path):
+                with open(attachment_path, "rb") as attachment:
+                    part = email.mime.base.MIMEBase('application',
+                                                    'octet-stream')
+                    part.set_payload(attachment.read())
+
+                encoders.encode_base64(part)
+                part.add_header(
+                    'Content-Disposition',
+                    f'attachment; filename= '
+                    f'{os.path.basename(attachment_path)}'
+                )
+                msg.attach(part)
+            else:
+                logging.warning(f"Attachment file not found: "
+                                f"{attachment_path}")
+
+            # Send email
+            with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port) as server:
+                server.login(self.username, self.password)
+                server.send_message(msg)
+                
+            logging.info(f"Email sent successfully to {recipient}")
+            return True
+
+        except Exception as e:
+            logging.error(f"Failed to send email: {e}")
+            return False
+
+
+def parse_smtp_url(smtp_url: str) -> tuple[str, int, str, str]:
+    """Parse SMTP URL format: smtp://username:password@server:port"""
+    from urllib.parse import urlparse
+    
+    parsed = urlparse(smtp_url)
+    server = parsed.hostname
+    port = parsed.port or 465  # Default to 465 for SMTP_SSL
+    username = parsed.username
+    password = parsed.password
+    
+    return server, port, username, password
+
+
 def fetch_parse_crossref_emails():
     """Main function to fetch and parse Crossref error emails"""
 
@@ -250,17 +332,50 @@ def fetch_parse_crossref_emails():
         checked_folder = 'INBOX/Crossref_submissions/Checked'
 
         # Process each message
-        for email_message, msg_id, source_folder in messages:
+        for email_message, msg_uid, source_folder in messages:
             parsed_data = parser.parse_message(email_message)
             if parsed_data:
                 csv_writer.write_row(parsed_data)
                 # Move email to checked folder after successful processing
-                email_fetcher.move_message(msg_id, source_folder,
+                email_fetcher.move_message(msg_uid, source_folder,
                                            checked_folder)
             else:
-                logging.warning(f"Failed to parse message {msg_id}, "
+                logging.warning(f"Failed to parse message {msg_uid}, "
                                 f"leaving in {source_folder}")
             logging.info("---")
+
+        # Send email with CSV report if we processed any messages
+        if len(messages) > 0:
+            smtp_url = os.environ.get('THOTH_SMTP')
+            recipient_email = os.environ.get('CROSSREF_EMAIL')
+            
+            if smtp_url and recipient_email:
+                try:
+                    server, port, smtp_user, smtp_pass = parse_smtp_url(
+                        smtp_url)
+                    email_sender = EmailSender(server, port, smtp_user,
+                                               smtp_pass)
+                    
+                    success = email_sender.send_email_with_attachment(
+                        recipient=recipient_email,
+                        subject="Crossref submission error reports from Thoth",
+                        body="Crossref errors are contained as an "
+                             "attached CSV",
+                        sender="Thoth Open Metadata <info@thoth.pub>",
+                        attachment_path=csv_writer.csv_path
+                    )
+                    
+                    if success:
+                        logging.info("Email report sent successfully")
+                    else:
+                        logging.warning("Failed to send email report")
+                        
+                except Exception as e:
+                    logging.error(f"Error sending email: {e}")
+            else:
+                logging.info("SMTP credentials not provided, skipping email")
+        else:
+            logging.info("No messages processed, skipping email")
 
         return True
 
@@ -274,9 +389,16 @@ def fetch_parse_crossref_emails():
 if __name__ == "__main__":
     logging.info("Starting Crossref error email fetch and processing...")
     success = fetch_parse_crossref_emails()
+    
+    # Force flush all outputs
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
     if success:
         logging.info("Email fetch and processing completed successfully")
+        logging.info("Script terminating with success code")
         sys.exit(0)
     else:
         logging.error("Email fetch and processing failed")
+        logging.error("Script terminating with error code")
         sys.exit(1)
