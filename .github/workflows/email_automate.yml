@@ -7,6 +7,14 @@ on:
       automation:
         required: true
         type: string
+  workflow_dispatch:
+    inputs:
+      automation:
+        required: true
+        type: choice
+        description: 'Email automation to run'
+        options:
+          - Crossref
 
 jobs:
   email-automate:

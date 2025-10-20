@@ -3,9 +3,9 @@
 name: crossref-error-report
 
 on:
-  schedule: 
-    # 'Runs at 06:40, on day 6 of the month'
-    - cron: '40 6 6 * *'
+  # schedule: 
+  #   # 'Runs at 06:40, on day 6 of the month'
+  #   - cron: '40 6 6 * *'
   workflow_dispatch:
 
 jobs:
