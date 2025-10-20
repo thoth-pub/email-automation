@@ -10,7 +10,6 @@ import argparse
 import logging
 import sys
 from dotenv import load_dotenv
-from pathlib import Path
 from crossref_error_report import CrossrefEmailProcessor
 
 AUTOMATORS = {
@@ -35,7 +34,10 @@ def run(automation):
     try:
         automator = AUTOMATORS[automation]
     except KeyError:
-        logging.error(f'{automation} automation not supported: platform must be one of {AUTOMATORS_STR}')
+        logging.error(
+            f'{automation} automation not supported: '
+            f'platform must be one of {AUTOMATORS_STR}'
+        )
         sys.exit(1)
     automator.run()
 
@@ -58,15 +60,7 @@ def get_arguments():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO,
                         format='%(levelname)s:%(asctime)s: %(message)s')
-    # DEBUG level urllib3 logs may contain sensitive information
-    # such as passwords (where sent as URL query parameters)
-    # and should never be output publicly (e.g. in GitHub Actions)
-    logging.getLogger("urllib3").setLevel(logging.INFO)
-    # paramiko INFO logs are verbose
-    logging.getLogger("paramiko").setLevel(logging.ERROR)
-    # dotenv only required for running locally - when running
-    # with Docker, --env-file option could be used instead
-    dotenv_path = Path('./config.env')
-    load_dotenv(dotenv_path=dotenv_path)
+    # Load config for local development (GitHub Actions uses env vars)
+    load_dotenv('./config.env')
     ARGUMENTS = get_arguments()
     run(ARGUMENTS.automation)

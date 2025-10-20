@@ -33,18 +33,12 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Make all platform credentials available to later steps (with names lowercased)
+      - name: Make all email automation credentials available to later steps
         uses: oNaiPs/secrets-to-env-action@v1.5
         with:
           secrets: ${{ toJSON(secrets) }}
 
       - name: Run email automator
-        # env:
-        #   IMAP_SERVER: ${{ secrets.IMAP_SERVER }}
-        #   IMAP_USERNAME: ${{ secrets.IMAP_USERNAME }}
-        #   IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
-        #   THOTH_SMTP: ${{ secrets.THOTH_SMTP }}
-        #   CROSSREF_EMAIL: ${{ secrets.CROSSREF_EMAIL }}
         run: python email_automator.py --automation "${{ inputs.automation }}"
 
       # - name: Upload output to artifact
