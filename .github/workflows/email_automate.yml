@@ -1,0 +1,41 @@
+# Logic shared between multiple workflows for email automation
+name: email-automate
+
+on:
+  workflow_call:
+    inputs:
+      automation:
+        required: true
+        type: string
+
+jobs:
+  email-automate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run email automator using Dockerhub image
+        run:
+          python email_automator.py \
+            --automation "${{ inputs.automation }}"
+
+      # - name: Upload output to artifact
+      #   uses: actions/upload-artifact@v4
+      #   if: contains(fromJSON('["InternetArchive", "CUL", "Figshare", "Zenodo"]'), inputs.platform)
+      #   with:
+      #     name: ${{ inputs.work-id }}
+      #     path: ${{ inputs.work-id }}
+      #     retention-days: 7
+      #     if-no-files-found: ignore
+      #     overwrite: false

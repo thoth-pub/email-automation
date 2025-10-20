@@ -21,8 +21,7 @@ class Config:
 
     def __init__(self):
         # Load environment variables from config.env
-        load_dotenv(dotenv_path=os.path.join(
-            os.path.dirname(__file__), '../config.env'))
+        load_dotenv(dotenv_path='./config.env')
 
         # IMAP settings
         self.imap_server = os.environ.get('IMAP_SERVER')
@@ -357,6 +356,27 @@ class CrossrefEmailProcessor:
         self.parser = CrossrefParser()
         self.csv_writer = CSVWriter()
 
+    @classmethod
+    def run(cls):
+        """Class method to run the Crossref email processor"""
+        try:
+            config = Config()
+            processor = cls(config)
+            success = processor.process_emails()
+            
+            if success:
+                logging.info("Crossref email processing completed")
+            else:
+                logging.error("Crossref email processing failed")
+                sys.exit(1)
+                
+        except ValueError as e:
+            logging.error(f"Configuration error: {e}")
+            sys.exit(1)
+        except Exception as e:
+            logging.error(f"Unexpected error: {e}")
+            sys.exit(1)
+
     def process_emails(self) -> bool:
         """Main processing workflow"""
         try:
@@ -422,35 +442,3 @@ class CrossrefEmailProcessor:
 
         except Exception as e:
             logging.error(f"Error sending email: {e}")
-
-
-def fetch_parse_crossref_emails():
-    """Main function to fetch and parse Crossref error emails"""
-    try:
-        config = Config()
-        processor = CrossrefEmailProcessor(config)
-        return processor.process_emails()
-    except ValueError as e:
-        logging.error(f"Configuration error: {e}")
-        return False
-    except Exception as e:
-        logging.error(f"Unexpected error: {e}")
-        return False
-
-
-if __name__ == "__main__":
-    logging.info("Starting Crossref error email fetch and processing...")
-    success = fetch_parse_crossref_emails()
-
-    # Force flush all outputs
-    sys.stdout.flush()
-    sys.stderr.flush()
-
-    if success:
-        logging.info("Email fetch and processing completed successfully")
-        logging.info("Script terminating with success code")
-        sys.exit(0)
-    else:
-        logging.error("Email fetch and processing failed")
-        logging.error("Script terminating with error code")
-        sys.exit(1)
