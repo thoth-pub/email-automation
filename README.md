@@ -22,18 +22,9 @@ email_automator.py          # Main orchestrator and CLI entry point
 - **Email Utilities** (`email_utils.py`): Reusable IMAP, SMTP, and CSV operations
 - **Automation Orchestrator** (`email_automator.py`): Routes requests to specific automations
 - **Crossref Processor** (`crossref_error_report.py`): Handles Crossref submission error emails
-- **GitHub Actions**: Automated scheduling and execution in the cloud
+- **GitHub Actions**: Automated scheduling and execution
 
-## 🚀 Features
-
-- **Modular Design**: Easy to add new automation types
-- **UID-based IMAP**: Reliable email operations that avoid message ID conflicts
-- **Secure SMTP**: STARTTLS encryption for email sending
-- **GitHub Actions Integration**: Automated execution with secrets management
-- **Comprehensive Logging**: Detailed execution tracking
-- **Error Handling**: Robust error recovery and reporting
-
-## 📧 Current Automations
+## Current Automations
 
 ### Crossref Error Reports
 Processes Crossref submission error emails and generates monthly reports:
@@ -64,7 +55,7 @@ CROSSREF_EMAIL=crossref@example.com
 
 ### 2. GitHub Secrets (for production)
 
-Configure these secrets in your GitHub repository:
+Configure these secrets in the repository:
 - `IMAP_SERVER`
 - `IMAP_USERNAME` 
 - `IMAP_PASSWORD`
@@ -77,16 +68,13 @@ Configure these secrets in your GitHub repository:
 pip install -r requirements.txt
 ```
 
-## 🔧 Usage
+## Usage
 
 ### Local Development
 
 ```bash
 # Run Crossref automation
 python email_automator.py --automation Crossref
-
-# View available automations
-python email_automator.py --help
 ```
 
 ### GitHub Actions

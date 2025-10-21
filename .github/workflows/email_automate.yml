@@ -1,4 +1,6 @@
-# Logic shared between multiple workflows for email automation
+# Logic to be shared between multiple workflows for email automation.
+# Currently only used by crossref-error-report, but designed to be reused.
+
 name: email-automate
 
 on:
