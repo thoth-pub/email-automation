@@ -7,14 +7,11 @@ on:
       automation:
         required: true
         type: string
-  # workflow_dispatch:
-  #   inputs:
-  #     automation:
-  #       required: true
-  #       type: choice
-  #       description: 'Email automation to run'
-  #       options:
-  #         - Crossref
+      artifact_path:
+        required: false
+        type: string
+        description: 'Path pattern for output artifacts (e.g., "*.csv", "*.xlsx", "reports/*")'
+        default: '*.csv'
 
 jobs:
   email-automate:
@@ -27,7 +24,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       - name: Install dependencies
         run: |
@@ -41,12 +38,11 @@ jobs:
       - name: Run email automator
         run: python email_automator.py --automation "${{ inputs.automation }}"
 
-      # - name: Upload output to artifact
-      #   uses: actions/upload-artifact@v4
-      #   if: contains(fromJSON('["InternetArchive", "CUL", "Figshare", "Zenodo"]'), inputs.platform)
-      #   with:
-      #     name: ${{ inputs.work-id }}
-      #     path: ${{ inputs.work-id }}
-      #     retention-days: 7
-      #     if-no-files-found: ignore
-      #     overwrite: false
+      - name: Upload output artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.automation }}-output
+          path: ${{ inputs.artifact_path }}
+          retention-days: 7
+          if-no-files-found: ignore
+          overwrite: false

@@ -3,6 +3,7 @@
 name: crossref-error-report
 
 on:
+  # TODO: turn cron on after review
   # schedule: 
   #   # 'Runs at 06:40, on day 6 of the month'
   #   - cron: '40 6 6 * *'
@@ -14,30 +15,3 @@ jobs:
     with:
       automation: 'Crossref'
     secrets: inherit
-    # runs-on: ubuntu-latest
-    # steps:
-    #   - name: Checkout code
-    #     uses: actions/checkout@v4
-      
-    #   - name: Set up Python
-    #     uses: actions/setup-python@v4
-    #     with:
-    #       python-version: '3.11'
-
-    #   - name: Install dependencies
-    #     run: pip install -r requirements.txt
-      
-    #   - name: Run Crossref error email fetch and parse script, send automatic email error report to Crossref
-    #     env:
-    #       IMAP_SERVER: ${{ secrets.IMAP_SERVER }}
-    #       IMAP_USERNAME: ${{ secrets.IMAP_USERNAME }}
-    #       IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
-    #       THOTH_SMTP: ${{ secrets.THOTH_SMTP }}
-    #       CROSSREF_EMAIL: ${{ secrets.CROSSREF_EMAIL }}
-    #     run: python src/generate_error_report.py
-
-    #   - name: Upload error report CSV as artifact
-    #     uses: actions/upload-artifact@v4
-    #     with:
-    #       name: crossref-error-report
-    #       path: crossref_error_report.csv
