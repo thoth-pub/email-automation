@@ -1,0 +1,48 @@
+# Logic shared between multiple workflows for email automation
+name: email-automate
+
+on:
+  workflow_call:
+    inputs:
+      automation:
+        required: true
+        type: string
+      artifact_path:
+        required: false
+        type: string
+        description: 'Path pattern for output artifacts (e.g., "*.csv", "*.xlsx", "reports/*")'
+        default: '*.csv'
+
+jobs:
+  email-automate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Make all email automation credentials available to later steps
+        uses: oNaiPs/secrets-to-env-action@v1.5
+        with:
+          secrets: ${{ toJSON(secrets) }}
+
+      - name: Run email automator for selected platform
+        run: python email_automator.py --automation "${{ inputs.automation }}"
+
+      - name: Upload output artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.automation }}-output
+          path: ${{ inputs.artifact_path }}
+          retention-days: 60
+          if-no-files-found: ignore
+          overwrite: false
