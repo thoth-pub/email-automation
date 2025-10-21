@@ -7,8 +7,19 @@ from dotenv import load_dotenv
 import requests
 import logging
 from typing import Dict, Any, Optional
-
 from email_utils import EmailFetcher, EmailSender, CSVWriter, parse_smtp_url
+
+# General constants
+DEFAULT_THOTH_API_URL = 'https://api.thoth.pub/graphql'
+DEFAULT_SMTP_PORT = 587
+EMAIL_SENDER = "Thoth Open Metadata <info@thoth.pub>"
+
+# Crossref-specific constants
+CROSSREF_CSV_FILENAME = 'crossref_error_report.csv'
+CROSSREF_EMAIL_SUBJECT = "Crossref submission error reports from Thoth"
+CROSSREF_EMAIL_BODY = "Crossref errors are contained as an attached CSV"
+
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 
 class Config:
@@ -43,20 +54,6 @@ class Config:
             raise ValueError(
                 "Missing required IMAP configuration: "
                 "IMAP_SERVER, IMAP_USERNAME, IMAP_PASSWORD")
-
-
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-
-
-# General constants
-DEFAULT_THOTH_API_URL = 'https://api.thoth.pub/graphql'
-DEFAULT_SMTP_PORT = 587
-EMAIL_SENDER = "Thoth Open Metadata <info@thoth.pub>"
-
-# Crossref-specific constants
-CROSSREF_CSV_FILENAME = 'crossref_error_report.csv'
-CROSSREF_EMAIL_SUBJECT = "Crossref submission error reports from Thoth"
-CROSSREF_EMAIL_BODY = "Crossref errors are contained as an attached CSV"
 
 
 class CrossrefParser:
@@ -98,7 +95,7 @@ class CrossrefParser:
                   if diagnostic is not None else None)
         msg = diagnostic.find('msg') if diagnostic is not None else None
 
-        # Enrich with Thoth API data
+        # Get Work DOI and Title from Thoth API
         doi, title = self._fetch_thoth_data(thoth_work_id)
 
         return {

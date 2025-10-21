@@ -35,7 +35,7 @@ jobs:
         with:
           secrets: ${{ toJSON(secrets) }}
 
-      - name: Run email automator
+      - name: Run email automator for selected platform
         run: python email_automator.py --automation "${{ inputs.automation }}"
 
       - name: Upload output artifacts
@@ -43,6 +43,6 @@ jobs:
         with:
           name: ${{ inputs.automation }}-output
           path: ${{ inputs.artifact_path }}
-          retention-days: 7
+          retention-days: 60
           if-no-files-found: ignore
           overwrite: false

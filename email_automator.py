@@ -60,7 +60,7 @@ def get_arguments():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO,
                         format='%(levelname)s:%(asctime)s: %(message)s')
-    # Load config for local development (GitHub Actions uses env vars)
+    # Load config for local development (GitHub Actions uses Secrets)
     load_dotenv('./config.env')
     ARGUMENTS = get_arguments()
     run(ARGUMENTS.automation)

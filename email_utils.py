@@ -31,7 +31,14 @@ class EmailFetcher:
         self.mail = None
 
     def connect(self) -> bool:
-        """Connect to IMAP server"""
+        """
+        Establish connection to IMAP server using SSL.
+
+        Returns:
+            bool: True if connection successful, False otherwise
+
+        Logs connection status and any errors encountered.
+        """
         try:
             logging.info("Connecting to email server...")
             self.mail = imaplib.IMAP4_SSL(self.server)
@@ -42,7 +49,12 @@ class EmailFetcher:
             return False
 
     def disconnect(self):
-        """Close IMAP connection"""
+        """
+        Safely close IMAP connection and logout.
+
+        Handles cleanup even if connection is already closed or errors occur.
+        Always sets self.mail to None to prevent reuse of stale connection.
+        """
         if self.mail:
             try:
                 self.mail.close()
@@ -180,7 +192,8 @@ class EmailSender:
             # Send email using SMTP with STARTTLS (port 587)
             logging.info(f"Sending email via {self.smtp_server}:587")
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                server.starttls()  # Upgrade to TLS
+                # Upgrade to TLS
+                server.starttls()
                 server.login(self.username, self.password)
                 server.send_message(msg)
 
