@@ -16,6 +16,7 @@ EMAIL_SENDER = "Thoth Open Metadata <info@thoth.pub>"
 
 # Crossref-specific constants
 CROSSREF_CSV_FILENAME = 'crossref_error_report.csv'
+# TODO: replace with specific email subject and body from Toby/Hannah
 CROSSREF_EMAIL_SUBJECT = "Crossref submission error reports from Thoth"
 CROSSREF_EMAIL_BODY = "Crossref errors are contained as an attached CSV"
 
@@ -75,13 +76,41 @@ class CrossrefParser:
         # Parse XML from body
         try:
             bodyxml = ET.fromstring(body)
+            
+            # Debug: Log XML structure to understand element nesting
+            logging.debug("XML Structure Analysis:")
+            logging.debug(f"Root tag: {bodyxml.tag}")
+            for i, child in enumerate(bodyxml):
+                logging.debug(f"  Child {i}: {child.tag}")
+                for j, grandchild in enumerate(child):
+                    logging.debug(f"    Grandchild {j}: {grandchild.tag}")
+            
+            # Debug: Log raw XML (truncated for readability)
+            xml_str = ET.tostring(bodyxml, encoding='unicode')
+            logging.debug(f"Raw XML (first 500 chars): {xml_str[:500]}...")
+            
         except Exception as e:
             logging.error(f"Failed to parse XML: {e}")
             return None
 
         # Extract relevant Crossref submission metadata from email body
+        # Using .// to search at any depth in case XML structure varies
         submission_id = bodyxml.findtext('.//submission_id')
         batch_id = bodyxml.findtext('.//batch_id')
+        
+        # Debug: Test both approaches to see if .// is necessary
+        submission_id_direct = bodyxml.findtext('submission_id')
+        batch_id_direct = bodyxml.findtext('batch_id')
+        
+        logging.debug(f"submission_id with .//: {submission_id}")
+        logging.debug(f"submission_id direct: {submission_id_direct}")
+        logging.debug(f"batch_id with .//: {batch_id}")
+        logging.debug(f"batch_id direct: {batch_id_direct}")
+        
+        if submission_id != submission_id_direct:
+            logging.warning("submission_id: .// and direct access differ!")
+        if batch_id != batch_id_direct:
+            logging.warning("batch_id: .// and direct access differ!")
 
         logging.info(f"Processing Crossref Submission ID: {submission_id}")
 
@@ -93,7 +122,16 @@ class CrossrefParser:
             thoth_work_id_url = f"https://thoth.pub/books/{thoth_work_id}"
 
         # Extract specific diagnostic error information
+        # Using .// to find record_diagnostic at any depth in error structure
         diagnostic = bodyxml.find('.//record_diagnostic')
+        diagnostic_direct = bodyxml.find('record_diagnostic')
+        
+        logging.debug(f"record_diagnostic with .//: {diagnostic}")
+        logging.debug(f"record_diagnostic direct: {diagnostic_direct}")
+        
+        if (diagnostic is None) != (diagnostic_direct is None):
+            logging.warning("record_diagnostic: .// and direct access differ!")
+            
         msg_id = (diagnostic.attrib.get('msg_id')
                   if diagnostic is not None else None)
         msg = diagnostic.find('msg') if diagnostic is not None else None
