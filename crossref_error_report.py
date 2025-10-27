@@ -20,7 +20,12 @@ CROSSREF_CSV_FILENAME = 'crossref_error_report.csv'
 CROSSREF_EMAIL_SUBJECT = "Crossref submission error reports from Thoth"
 CROSSREF_EMAIL_BODY = "Crossref errors are contained as an attached CSV"
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# Enable DEBUG logging for XML structure analysis in GitHub Actions
+# This will show XML structure and element access comparisons in job logs
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 
 class Config:
@@ -59,7 +64,7 @@ class Config:
 
 
 class CrossrefParser:
-    """Crossref-specific logic for parsing error messages received by email 
+    """Crossref-specific logic for parsing error messages received by email
     from Crossref, and augmenting them with data from the Thoth API
     for submission back to Crossref. """
 
