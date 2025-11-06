@@ -20,10 +20,8 @@ CROSSREF_CSV_FILENAME = 'crossref_error_report.csv'
 CROSSREF_EMAIL_SUBJECT = "Crossref submission error reports from Thoth"
 CROSSREF_EMAIL_BODY = "Crossref errors are contained as an attached CSV"
 
-# Enable DEBUG logging for XML structure analysis in GitHub Actions
-# This will show XML structure and element access comparisons in job logs
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
@@ -81,41 +79,13 @@ class CrossrefParser:
         # Parse XML from body
         try:
             bodyxml = ET.fromstring(body)
-            
-            # Debug: Log XML structure to understand element nesting
-            logging.debug("XML Structure Analysis:")
-            logging.debug(f"Root tag: {bodyxml.tag}")
-            for i, child in enumerate(bodyxml):
-                logging.debug(f"  Child {i}: {child.tag}")
-                for j, grandchild in enumerate(child):
-                    logging.debug(f"    Grandchild {j}: {grandchild.tag}")
-            
-            # Debug: Log raw XML (truncated for readability)
-            xml_str = ET.tostring(bodyxml, encoding='unicode')
-            logging.debug(f"Raw XML (first 500 chars): {xml_str[:500]}...")
-            
         except Exception as e:
             logging.error(f"Failed to parse XML: {e}")
             return None
 
         # Extract relevant Crossref submission metadata from email body
-        # Using .// to search at any depth in case XML structure varies
-        submission_id = bodyxml.findtext('.//submission_id')
-        batch_id = bodyxml.findtext('.//batch_id')
-        
-        # Debug: Test both approaches to see if .// is necessary
-        submission_id_direct = bodyxml.findtext('submission_id')
-        batch_id_direct = bodyxml.findtext('batch_id')
-        
-        logging.debug(f"submission_id with .//: {submission_id}")
-        logging.debug(f"submission_id direct: {submission_id_direct}")
-        logging.debug(f"batch_id with .//: {batch_id}")
-        logging.debug(f"batch_id direct: {batch_id_direct}")
-        
-        if submission_id != submission_id_direct:
-            logging.warning("submission_id: .// and direct access differ!")
-        if batch_id != batch_id_direct:
-            logging.warning("batch_id: .// and direct access differ!")
+        submission_id = bodyxml.findtext('submission_id')
+        batch_id = bodyxml.findtext('batch_id')
 
         logging.info(f"Processing Crossref Submission ID: {submission_id}")
 
@@ -127,57 +97,52 @@ class CrossrefParser:
             thoth_work_id_url = f"https://thoth.pub/books/{thoth_work_id}"
 
         # Extract specific diagnostic error information
-        # Using .// to find record_diagnostic at any depth in error structure
-        diagnostic = bodyxml.find('.//record_diagnostic')
-        diagnostic_direct = bodyxml.find('record_diagnostic')
-        
-        logging.debug(f"record_diagnostic with .//: {diagnostic}")
-        logging.debug(f"record_diagnostic direct: {diagnostic_direct}")
-        
-        if (diagnostic is None) != (diagnostic_direct is None):
-            logging.warning("record_diagnostic: .// and direct access differ!")
-            
+        # record_diagnostic is a direct child of root element
+        diagnostic = bodyxml.find('record_diagnostic')
         msg_id = (diagnostic.attrib.get('msg_id')
                   if diagnostic is not None else None)
         msg = diagnostic.find('msg') if diagnostic is not None else None
 
         # Get Work DOI and Title from Thoth API
-        doi, title = self._fetch_thoth_data(thoth_work_id)
+        doi, title, subtitle = self._fetch_thoth_data(thoth_work_id)
 
         return {
             'submission_id': submission_id,
             'batch_id': batch_id,
             'thoth_record_url': thoth_work_id_url,
             'work_title': title,
+            'work_subtitle': subtitle,
             'doi': doi,
             'crossref_error_msg_id': msg_id,
             'crossref_error_message': msg.text if msg is not None else None
         }
 
-    def _fetch_thoth_data(self, thoth_work_id: str
-                          ) -> tuple[Optional[str], Optional[str]]:
+    def _fetch_thoth_data(self, thoth_work_id: str) -> tuple[Optional[str],
+                                                             Optional[str],
+                                                             Optional[str]]:
         """Fetch DOI and title from Thoth API"""
 
         if not thoth_work_id:
-            return None, None
+            return None, None, None
 
-        query = '{ work(workId: "%s") { doi fullTitle } }' % thoth_work_id
+        query = '{ work(workId: "%s") { doi title subtitle } }' % thoth_work_id
 
         try:
             response = requests.post(self.thoth_api_url, json={'query': query})
-            if response.status_code == 200:
-                data = response.json()
-                work = data.get('data', {}).get('work', {})
-                doi = work.get('doi')
-                title = work.get('fullTitle')
-                logging.info(f"Retrieved Thoth data - DOI: {doi}")
-                return doi, title
-            else:
-                logging.error(f"Thoth API error: {response.status_code}")
-                return None, None
+            response.raise_for_status()
+            data = response.json()
+            work = data.get('data', {}).get('work', {})
+            doi = work.get('doi')
+            title = work.get('title')
+            subtitle = work.get('subtitle')
+            logging.info(f"Retrieved Thoth data - DOI: {doi}")
+            return doi, title, subtitle
+        except requests.exceptions.HTTPError as e:
+            logging.error(f"Thoth API HTTP error: {e}")
+            return None, None, None
         except Exception as e:
             logging.error(f"Error fetching Thoth data: {e}")
-            return None, None
+            return None, None, None
 
 
 class CrossrefEmailProcessor:
@@ -200,9 +165,7 @@ class CrossrefEmailProcessor:
         try:
             config = Config()
             processor = cls(config)
-            success = processor.process_emails()
-
-            if success:
+            if processor.process_emails():
                 logging.info("Crossref email processing completed")
             else:
                 logging.error("Crossref email processing failed")
@@ -279,6 +242,8 @@ class CrossrefEmailProcessor:
                 logging.info("Email report sent successfully")
             else:
                 logging.warning("Failed to send email report")
+                sys.exit(1)
 
         except Exception as e:
             logging.error(f"Error sending email: {e}")
+            sys.exit(1)

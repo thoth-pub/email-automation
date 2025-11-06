@@ -11,14 +11,15 @@ import os
 import email.mime.text
 import email.mime.multipart
 import email.mime.base
+import csv
 from email import encoders
-import pandas as pd
 import logging
 from typing import List, Dict, Any
 from urllib.parse import urlparse
 
 # General constants
 DEFAULT_SMTP_PORT = 587
+IMAP_OK_STATUS = 'OK'
 
 
 class EmailFetcher:
@@ -71,21 +72,21 @@ class EmailFetcher:
         try:
             # Select the source folder
             status, _ = self.mail.select(source_folder)
-            if status != 'OK':
+            if status != IMAP_OK_STATUS:
                 logging.error(f"Failed to select source folder "
                               f"{source_folder}")
                 return False
 
             # Copy message to destination folder using UID
             status, _ = self.mail.uid('copy', msg_uid, destination_folder)
-            if status != 'OK':
+            if status != IMAP_OK_STATUS:
                 logging.error(f"Failed to copy message {msg_uid} to "
                               f"{destination_folder}")
                 return False
 
             # Mark original message for deletion using UID
             status, _ = self.mail.uid('store', msg_uid, '+FLAGS', '\\Deleted')
-            if status != 'OK':
+            if status != IMAP_OK_STATUS:
                 logging.error(f"Failed to mark message {msg_uid} for deletion")
                 return False
 
@@ -118,7 +119,7 @@ class EmailFetcher:
 
         # Select folder
         status, folder_messages = self.mail.select(folder)
-        if status != 'OK':
+        if status != IMAP_OK_STATUS:
             logging.error(f"Failed to select {folder}: {status}")
             return messages
 
@@ -126,7 +127,7 @@ class EmailFetcher:
 
         # Search for all messages using UID
         status, message_uids = self.mail.uid('search', None, 'ALL')
-        if status != 'OK':
+        if status != IMAP_OK_STATUS:
             logging.error(f"Failed to search messages in {folder}")
             return messages
 
@@ -135,7 +136,7 @@ class EmailFetcher:
         # Fetch each message using UID
         for msg_uid in message_uid_list:
             status, msg_data = self.mail.uid('fetch', msg_uid, '(RFC822)')
-            if status == 'OK':
+            if status == IMAP_OK_STATUS:
                 email_body = msg_data[0][1]
                 email_message = email.message_from_bytes(email_body)
                 # Return tuple: (email_message, msg_uid, folder)
@@ -206,20 +207,29 @@ class EmailSender:
 
 
 class CSVWriter:
-    """Handles CSV file operations"""
+    """Handles CSV file operations using standard library only"""
 
     def __init__(self, csv_path: str):
         self.csv_path = csv_path
 
     def write_row(self, row_data: Dict[str, Any]):
-        """Write a single row to CSV"""
-        try:
-            df = pd.read_csv(self.csv_path)
-            df = pd.concat([df, pd.DataFrame([row_data])], ignore_index=True)
-        except FileNotFoundError:
-            df = pd.DataFrame([row_data])
+        """Write a single row to CSV using standard library csv module"""
 
-        df.to_csv(self.csv_path, index=False)
+        # Determine if file exists and has content
+        file_exists = os.path.exists(self.csv_path)
+        file_has_content = file_exists and os.path.getsize(self.csv_path) > 0
+
+        # Get column headers from the row data
+        headers = list(row_data.keys())
+
+        with open(self.csv_path, 'a', newline='', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=headers)
+
+            # Write headers only if file is new or empty
+            if not file_has_content:
+                writer.writeheader()
+
+            writer.writerow(row_data)
 
 
 def parse_smtp_url(smtp_url: str) -> tuple[str, int, str, str]:
