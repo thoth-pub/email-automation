@@ -14,7 +14,7 @@ email_automator.py          # Main orchestrator and CLI entry point
 ├── email_utils.py          # Reusable email utilities (IMAP, SMTP, CSV)
 └── .github/workflows/      # GitHub Actions for automated execution
     ├── email_automate.yml  # Reusable workflow template
-    └── crossref-error-report.yml # Crossref-specific scheduler
+    └── crossref-error-report.yml # Crossref-specific workflow and scheduler
 ```
 
 ### Core Components
@@ -22,7 +22,7 @@ email_automator.py          # Main orchestrator and CLI entry point
 - **Email Utilities** (`email_utils.py`): Reusable IMAP, SMTP, and CSV operations
 - **Automation Orchestrator** (`email_automator.py`): Routes requests to specific automations
 - **Crossref Processor** (`crossref_error_report.py`): Handles Crossref submission error emails
-- **GitHub Actions**: Automated scheduling and execution
+- **GitHub Actions**: (`.github/workflows`): Automated scheduling and execution
 
 ## Current Automations
 
@@ -30,10 +30,10 @@ email_automator.py          # Main orchestrator and CLI entry point
 Processes Crossref submission error emails and generates monthly reports:
 - Fetches error emails from designated IMAP folders
 - Parses XML content to extract submission details
-- Enriches data with Thoth API information (DOI, title)
+- Enriches data with Thoth API information (DOI, title, subtitle)
 - Generates CSV reports with comprehensive error details
-- Emails reports to designated recipients
-- Moves processed emails to checked folder
+- Emails reports to Crossref
+- Moves processed emails to Checked folder
 
 ## 🛠️ Setup
 
@@ -49,7 +49,7 @@ IMAP_PASSWORD=your_password
 # SMTP Configuration  
 THOTH_SMTP=smtp://username:password@smtp.server.com:587
 
-# Recipients
+# Recipient (for Crossref workflow)
 CROSSREF_EMAIL=crossref@example.com
 ```
 

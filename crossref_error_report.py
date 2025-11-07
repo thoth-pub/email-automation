@@ -15,8 +15,8 @@ DEFAULT_SMTP_PORT = 587
 EMAIL_SENDER = "Thoth Open Metadata <info@thoth.pub>"
 
 # Crossref-specific constants
+# TODO: replace with specific attachment filename, email subject and body based on Crossref feedback
 CROSSREF_CSV_FILENAME = 'crossref_error_report.csv'
-# TODO: replace with specific email subject and body from Toby/Hannah
 CROSSREF_EMAIL_SUBJECT = "Crossref submission error reports from Thoth"
 CROSSREF_EMAIL_BODY = "Crossref errors are contained as an attached CSV"
 
@@ -64,7 +64,7 @@ class Config:
 class CrossrefParser:
     """Crossref-specific logic for parsing error messages received by email
     from Crossref, and augmenting them with data from the Thoth API
-    for submission back to Crossref. """
+    for submission back to Crossref as an email with attached CSV. """
 
     def __init__(self, thoth_api_url: str = DEFAULT_THOTH_API_URL):
         self.thoth_api_url = thoth_api_url
@@ -96,14 +96,14 @@ class CrossrefParser:
             thoth_work_id = batch_id.split('_')[0]
             thoth_work_id_url = f"https://thoth.pub/books/{thoth_work_id}"
 
-        # Extract specific diagnostic error information
+        # Extract specific diagnostic error information from email
         # record_diagnostic is a direct child of root element
         diagnostic = bodyxml.find('record_diagnostic')
         msg_id = (diagnostic.attrib.get('msg_id')
                   if diagnostic is not None else None)
         msg = diagnostic.find('msg') if diagnostic is not None else None
 
-        # Get Work DOI and Title from Thoth API
+        # Get Work DOI, Title and Subtitle from Thoth API
         doi, title, subtitle = self._fetch_thoth_data(thoth_work_id)
 
         return {
@@ -170,7 +170,6 @@ class CrossrefEmailProcessor:
             else:
                 logging.error("Crossref email processing failed")
                 sys.exit(1)
-
         except ValueError as e:
             logging.error(f"Configuration error: {e}")
             sys.exit(1)
@@ -179,7 +178,7 @@ class CrossrefEmailProcessor:
             sys.exit(1)
 
     def process_emails(self) -> bool:
-        """Main processing workflow"""
+        """Main email processing workflow"""
 
         try:
             # Connect to email server
@@ -208,8 +207,8 @@ class CrossrefEmailProcessor:
             if messages:
                 self._send_report()
             else:
-                logging.info("No messages processed, skipping email")
-
+                logging.info("No messages in folders to process, "
+                             "skipping sending email")
             return True
 
         except Exception as e:
@@ -222,8 +221,9 @@ class CrossrefEmailProcessor:
         """Send email report to Crossref with CSV attachment"""
 
         if not (self.config.smtp_url and self.config.recipient_email):
-            logging.info("SMTP credentials not provided, skipping email")
-            return
+            logging.error("SMTP credentials not provided - cannot send "
+                          "email report")
+            sys.exit(1)
 
         try:
             server, port, smtp_user, smtp_pass = parse_smtp_url(
@@ -241,7 +241,7 @@ class CrossrefEmailProcessor:
             if success:
                 logging.info("Email report sent successfully")
             else:
-                logging.warning("Failed to send email report")
+                logging.error("Failed to send email report")
                 sys.exit(1)
 
         except Exception as e:
