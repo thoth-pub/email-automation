@@ -1,4 +1,5 @@
-# Purpose: send a monthly report to Crossref of error messages
+# Purpose: generate a CSV report of submission errors 
+# from Thoth submissions to Crossref, to periodically send back to Crossref.
 
 name: crossref-error-report
 
