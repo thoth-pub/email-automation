@@ -4,10 +4,9 @@
 name: crossref-error-report
 
 on:
-  # TODO: turn cron on after review
-  # schedule: 
-  #   # 'Runs at 06:40, on day 6 of the month'
-  #   - cron: '40 6 6 * *'
+  schedule: 
+    # Runs every Monday at 06:40 UTC
+    - cron: '40 6 * * 1'
   workflow_dispatch:
 
 jobs:
