@@ -156,7 +156,7 @@ class EmailSender:
         self.password = password
 
     def send_email_with_attachment(self, recipient: str, subject: str,
-                                   body: str, sender: str,
+                                   body: str, sender: str, cc: str | None,
                                    attachment_path: str) -> bool:
         """Send email with CSV attachment"""
         try:
@@ -168,6 +168,7 @@ class EmailSender:
             msg['From'] = sender
             msg['To'] = recipient
             msg['Subject'] = subject
+            msg['Cc'] = cc
 
             # Add body
             msg.attach(email.mime.text.MIMEText(body, 'plain'))

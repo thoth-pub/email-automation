@@ -13,6 +13,7 @@ from email_utils import EmailFetcher, EmailSender, CSVWriter, parse_smtp_url
 DEFAULT_THOTH_API_URL = 'https://api.thoth.pub/graphql'
 DEFAULT_SMTP_PORT = 587
 EMAIL_SENDER = "Thoth Open Metadata <info@thoth.pub>"
+EMAIL_CC = "distribution@thoth.pub"
 
 # Crossref-specific constants
 # TODO: replace with specific attachment filename, email subject and body based on Crossref feedback
@@ -235,6 +236,7 @@ class CrossrefEmailProcessor:
                 subject=CROSSREF_EMAIL_SUBJECT,
                 body=CROSSREF_EMAIL_BODY,
                 sender=EMAIL_SENDER,
+                cc=EMAIL_CC,
                 attachment_path=self.csv_writer.csv_path
             )
 
