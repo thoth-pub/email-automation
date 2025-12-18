@@ -3,6 +3,7 @@ import email
 import os
 import sys
 import xml.etree.ElementTree as ET
+from datetime import date
 from dotenv import load_dotenv
 import requests
 import logging
@@ -17,7 +18,7 @@ EMAIL_CC = "distribution@thoth.pub"
 
 # Crossref-specific constants
 # TODO: replace with specific attachment filename, email subject and body based on Crossref feedback
-CROSSREF_CSV_FILENAME = 'crossref_error_report.csv'
+CROSSREF_CSV_FILENAME = 'crossref_error_report'
 CROSSREF_EMAIL_SUBJECT = "Crossref submission error reports from Thoth"
 CROSSREF_EMAIL_BODY = "Crossref errors are contained as an attached CSV"
 
@@ -157,7 +158,10 @@ class CrossrefEmailProcessor:
             config.imap_password
         )
         self.parser = CrossrefParser()
-        self.csv_writer = CSVWriter(CROSSREF_CSV_FILENAME)
+        self.csv_writer = CSVWriter("{}_{}.csv".format(
+            CROSSREF_CSV_FILENAME,
+            date.today().isoformat()
+        ))
 
     @classmethod
     def run(cls):
