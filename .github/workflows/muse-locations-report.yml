@@ -1,0 +1,18 @@
+# Purpose: check Thoth emails for new reports of Project MUSE upload locations,
+# then write them to Thoth (emails expected once monthly)
+
+name: muse-locations-report
+
+on:
+  schedule:
+    # Runs on the 15th of each month at 03:20 UTC
+    # TODO exact schedule TBC
+    - cron: '20 3 15 * *'
+  workflow_dispatch:
+
+jobs:
+  muse-locations-report:
+    uses: ./.github/workflows/email_automate.yml
+    with:
+      automation: 'ProjectMUSE'
+    secrets: inherit

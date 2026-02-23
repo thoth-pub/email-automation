@@ -2,7 +2,7 @@
 """
 Email automator
 
-Call custom workflows to send automated emails using the
+Call custom workflows to automatically check/send emails using the
 appropriate logic for various platforms.
 """
 
@@ -11,9 +11,11 @@ import logging
 import sys
 from dotenv import load_dotenv
 from crossref_error_report import CrossrefEmailProcessor
+from muse_locations_report import MUSEEmailProcessor
 
 AUTOMATORS = {
     "Crossref": CrossrefEmailProcessor,
+    "ProjectMUSE": MUSEEmailProcessor,
 }
 
 AUTOMATORS_STR = ', '.join("%s" % (key) for (key, _) in AUTOMATORS.items())
