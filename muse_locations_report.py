@@ -60,13 +60,9 @@ class MUSEParser:
     """MUSE-specific logic for parsing inventory messages received by email
     from MUSE, and writing their data to the Thoth API."""
 
-    def __init__(self, thoth_api_url: str = DEFAULT_THOTH_API_URL):
+    def __init__(self, thoth, thoth_api_url: str = DEFAULT_THOTH_API_URL):
+        self.thoth = thoth
         self.thoth_api_url = thoth_api_url
-        self.thoth = ThothClient()
-        try:
-            self.thoth.login(self.thoth_username, self.thoth_password)
-        except ThothError:
-            raise ValueError('Thoth login failed: credentials may be incorrect')
 
     def parse_message(self, email_message: email.message.EmailMessage
                       ) -> Optional[Dict[str, Any]]:
@@ -87,20 +83,37 @@ class MUSEParser:
             try:
                 isbn = str(data.at[row, 'online_identifier']).strip()
                 publications = self.thoth.publications(search=isbn)
-                if len(publications) != 1:
-                    raise ValueError(f"Unexpected number of results found for ISBN {isbn}: {len(publications)}")
+                if len(publications) == 0:
+                    raise ValueError(f"No publications found for ISBN {isbn}")
+                # We may have submitted either PDF or EPUB or both - no way to check
+                # Assume that the set of publications remains unchanged since submission
+                # and add locations to all relevant publications accordingly
+                elif len(publications) > 1:
+                    pdfs = [n for n in publications if n.publicationType == 'PDF']
+                    epubs = [n for n in publications if n.publicationType == 'EPUB']
+                    if not pdfs and not epubs:
+                        raise ValueError(f"No PDF or EPUB publications found for {isbn}")
+                    elif len(pdfs) > 1 or len(epubs) > 1:
+                        raise ValueError(f"Multiple publications of same type found for {isbn}")
                 landing_page = data.at[row, 'title_url']
             except KeyError:
                 raise ValueError('Excel spreadsheet missing expected column header')
 
-            location = {
-                'publicationId': publications[0].publicationId,
-                'landingPage': landing_page,
-                'fullTextUrl': '{}/pdf/download'.format(landing_page),
-                'locationPlatform': 'PROJECT_MUSE',
-                'canonical': 'false'
-            }
-            locations.extend(location)
+            for publication in publications:
+                if publication.publicationType == 'PDF':
+                    full_text_url = '{}/pdf/download'.format(landing_page)
+                elif publication.publicationType == 'EPUB':
+                    full_text_url = '{}/epub'.format(landing_page),
+                else:
+                    continue
+                location = {
+                    'publicationId': publication.publicationId,
+                    'landingPage': landing_page,
+                    'fullTextUrl': full_text_url,
+                    'locationPlatform': 'PROJECT_MUSE',
+                    'canonical': 'false'
+                }
+                locations.append(location)
 
         return locations
 
@@ -115,7 +128,12 @@ class MUSEEmailProcessor:
             config.imap_username,
             config.imap_password
         )
-        self.parser = MUSEParser()
+        self.thoth = ThothClient()
+        try:
+            self.thoth.login(config.thoth_username, config.thoth_password)
+        except ThothError:
+            raise ValueError('Thoth login failed: credentials may be incorrect')
+        self.parser = MUSEParser(self.thoth)
 
     @classmethod
     def run(cls):

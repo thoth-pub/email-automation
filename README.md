@@ -11,6 +11,7 @@ This system processes incoming emails, extracts relevant data, generates reports
 ```
 email_automator.py          # Main orchestrator and CLI entry point
 ├── crossref_error_report.py # Crossref-specific automation logic
+├── muse_locations_report.py # MUSE-specific automation logic
 ├── email_utils.py          # Reusable email utilities (IMAP, SMTP, CSV)
 └── .github/workflows/      # GitHub Actions for automated execution
     ├── email_automate.yml  # Reusable workflow template
@@ -46,7 +47,7 @@ IMAP_SERVER=your.imap.server.com
 IMAP_USERNAME=your.email@domain.com
 IMAP_PASSWORD=your_password
 
-# SMTP Configuration  
+# SMTP Configuration
 THOTH_SMTP=smtp://username:password@smtp.server.com:587
 
 # Recipient (for Crossref workflow)
@@ -57,7 +58,7 @@ CROSSREF_EMAIL=crossref@example.com
 
 Configure these secrets in the repository:
 - `IMAP_SERVER`
-- `IMAP_USERNAME` 
+- `IMAP_USERNAME`
 - `IMAP_PASSWORD`
 - `THOTH_SMTP`
 - `CROSSREF_EMAIL`
