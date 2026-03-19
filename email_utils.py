@@ -188,8 +188,10 @@ class EmailSender:
                 )
                 msg.attach(part)
             else:
-                logging.warning(f"Attachment file not found: "
-                                f"{attachment_path}")
+                # Don't send email if attachment path was given but no attachment was found there
+                logging.error(f"Attachment file not found: "
+                              f"{attachment_path}")
+                return False
 
             # Send email using SMTP with STARTTLS (port 587)
             logging.info(f"Sending email via {self.smtp_server}:587")
