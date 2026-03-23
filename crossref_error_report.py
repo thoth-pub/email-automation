@@ -80,7 +80,9 @@ class CrossrefParser:
 
         # Parse XML from body
         try:
-            bodyxml = ET.fromstring(body)
+            # Only start parsing from the first open tag bracket
+            # To work around error caused by addition of non-XML email preamble
+            bodyxml = ET.fromstring(body[body.find('<'):])
         except Exception as e:
             logging.error(f"Failed to parse XML: {e}")
             return None
