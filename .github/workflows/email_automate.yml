@@ -18,13 +18,13 @@ on:
 jobs:
   email-automate:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.14'
 
@@ -33,7 +33,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Make all email automation credentials available to later steps
-        uses: oNaiPs/secrets-to-env-action@v1.5
+        uses: oNaiPs/secrets-to-env-action@v1.8
         with:
           secrets: ${{ toJSON(secrets) }}
 
@@ -41,7 +41,7 @@ jobs:
         run: python email_automator.py --automation "${{ inputs.automation }}"
 
       - name: Upload output artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.automation }}-output
           path: ${{ inputs.artifact_path }}
