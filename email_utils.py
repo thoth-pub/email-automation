@@ -74,18 +74,24 @@ class EmailFetcher:
         Handles cleanup even if connection is already closed or errors occur.
         Always sets self.mail to None to prevent reuse of stale connection.
 
-        CLOSE is only issued when a mailbox is actually selected: it is
-        illegal in the authenticated state, and a run that aborts before
-        selecting anything must still be able to log out cleanly.
+        UNSELECT is used in preference to CLOSE. CLOSE permanently expunges
+        every message already carrying \\Deleted in the selected folder,
+        which is exactly the side effect the move logic goes out of its way
+        to avoid on Gmail; UNSELECT returns the connection to the
+        authenticated state without expunging anything. There is
+        deliberately no fall back to CLOSE. It is only issued when a folder
+        is actually selected, since it is illegal in the authenticated
+        state, and a run that aborts before selecting anything must still be
+        able to log out cleanly.
         """
         if not self.mail:
             return
 
         try:
             if getattr(self.mail, 'state', None) == 'SELECTED':
-                self.mail.close()
+                self.mail.unselect()
         except Exception as e:
-            logging.warning(f"Error closing selected folder: {e}")
+            logging.warning(f"Error unselecting folder: {e}")
 
         try:
             self.mail.logout()

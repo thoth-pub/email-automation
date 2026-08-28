@@ -306,33 +306,78 @@ class MoveMessageFallbackTests(unittest.TestCase):
 
 
 class DisconnectTests(unittest.TestCase):
-    """Disconnect must log out even when no folder has been selected"""
+    """Disconnect must never expunge, and must always log out.
 
-    def test_selected_folder_is_closed_before_logout(self):
+    CLOSE permanently expunges anything already flagged \\Deleted in the
+    selected folder, so disconnect uses UNSELECT instead.
+    """
+
+    def test_selected_folder_is_unselected_before_logout(self):
         mail = make_mock_mail()
         mail.state = 'SELECTED'
         fetcher = make_fetcher(mail)
         fetcher.disconnect()
-        mail.close.assert_called_once()
+        mail.unselect.assert_called_once()
         mail.logout.assert_called_once()
         self.assertIsNone(fetcher.mail)
+
+    def test_close_is_never_called(self):
+        for state in ('SELECTED', 'AUTH'):
+            with self.subTest(state=state):
+                mail = make_mock_mail()
+                mail.state = state
+                make_fetcher(mail).disconnect()
+                mail.close.assert_not_called()
+                mail.expunge.assert_not_called()
 
     def test_logout_still_happens_when_nothing_is_selected(self):
         mail = make_mock_mail()
         mail.state = 'AUTH'
         fetcher = make_fetcher(mail)
         fetcher.disconnect()
+        mail.unselect.assert_not_called()
         mail.close.assert_not_called()
         mail.logout.assert_called_once()
+        self.assertIsNone(fetcher.mail)
 
-    def test_close_failure_does_not_prevent_logout(self):
+    def test_unselect_failure_does_not_prevent_logout(self):
         mail = make_mock_mail()
         mail.state = 'SELECTED'
-        mail.close.side_effect = OSError('connection reset')
+        mail.unselect.side_effect = OSError('connection reset')
         fetcher = make_fetcher(mail)
         fetcher.disconnect()
         mail.logout.assert_called_once()
         self.assertIsNone(fetcher.mail)
+
+    def test_unselect_failure_does_not_fall_back_to_close(self):
+        mail = make_mock_mail()
+        mail.state = 'SELECTED'
+        mail.unselect.side_effect = OSError('connection reset')
+        make_fetcher(mail).disconnect()
+        # Falling back to CLOSE would reintroduce the expunge we are
+        # deliberately avoiding on Gmail
+        mail.close.assert_not_called()
+        mail.expunge.assert_not_called()
+
+
+class NoImapCloseInProductionTests(unittest.TestCase):
+    """No production module may issue IMAP CLOSE during normal disconnect"""
+
+    def test_production_code_does_not_call_imap_close(self):
+        for module in ('email_utils.py', 'crossref_error_report.py',
+                       'email_automator.py'):
+            with self.subTest(module=module):
+                with open(module, encoding='utf-8') as source_file:
+                    source = source_file.read()
+                offending = [
+                    line.strip() for line in source.splitlines()
+                    if '.close()' in line
+                    and not line.lstrip().startswith('#')
+                ]
+                self.assertEqual(
+                    offending, [],
+                    f"{module} calls CLOSE, which permanently expunges "
+                    f"\\Deleted messages; use UNSELECT instead")
 
 
 if __name__ == '__main__':
