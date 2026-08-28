@@ -43,6 +43,7 @@ Processes Crossref submission error emails and generates monthly reports:
 Create a `config.env` file (for local development):
 ```env
 # IMAP Configuration (inbound mail: Google Workspace)
+# Production reads from distribution@thoth.pub; see GitHub Secrets below
 IMAP_SERVER=imap.gmail.com
 IMAP_USERNAME=your.email@domain.com
 IMAP_PASSWORD=your_app_password
@@ -61,7 +62,8 @@ passwords to this repository.
 
 Configure these secrets in the repository:
 - `IMAP_SERVER` — `imap.gmail.com`
-- `IMAP_USERNAME` — the Google Workspace mailbox that receives Crossref mail
+- `IMAP_USERNAME` — `distribution@thoth.pub`, the dedicated Google
+  Workspace mailbox that receives Crossref mail
 - `IMAP_PASSWORD` — a Google Workspace **app password** for that mailbox
   (a normal account password will not work over IMAP)
 - `THOTH_SMTP`
@@ -80,9 +82,18 @@ any change to `THOTH_SMTP`.
 
 ### 3. Mailbox configuration
 
-Inbound mail is hosted on Google Workspace (previously Fastmail). Gmail
-exposes labels to IMAP as folders, with `/` separating levels of the
-hierarchy. The canonical labels used by the Crossref automation are:
+Inbound mail is hosted on Google Workspace (previously Fastmail).
+
+Production Crossref processing runs against the dedicated
+`distribution@thoth.pub` mailbox. Crossref deposits already name
+distribution@thoth.pub as the depositor email, so error reports arrive there
+and are classified there by the Gmail filters. The mail is deliberately not
+forwarded on to info@thoth.pub: the old distribution@ → info@ forwarding
+arrangement is not recreated under Google Workspace.
+
+Gmail exposes labels to IMAP as folders, with `/` separating levels of the
+hierarchy. The canonical labels used by the Crossref automation, all within
+the distribution@thoth.pub mailbox, are:
 
 | Purpose | Label |
 | --- | --- |
