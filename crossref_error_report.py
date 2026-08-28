@@ -44,13 +44,17 @@ class Config:
         self.smtp_url = os.environ.get('THOTH_SMTP')
         self.recipient_email = os.environ.get('CROSSREF_EMAIL')
 
-        # Specify email folders for reading error messages
+        # Specify email folders for reading error messages.
+        # These are Gmail's native label names, as created by the Gmail
+        # filters that classify incoming Crossref messages. The Fastmail
+        # hierarchy migrated into Gmail still exists under INBOX/..., but it
+        # holds historical mail only and must not be processed here.
         self.source_folders = [
-            'INBOX/Crossref_submissions/Error_reports/ISBN_already_assigned',
-            'INBOX/Crossref_submissions/Error_reports/ISSN_already_assigned'
+            'Crossref_submissions/Error_reports/ISBN_already_assigned',
+            'Crossref_submissions/Error_reports/ISSN_already_assigned'
         ]
         # Specify email folder to move Checked messages to after parsing
-        self.checked_folder = 'INBOX/Crossref_submissions/Checked'
+        self.checked_folder = 'Crossref_submissions/Checked'
 
         # Validate required settings
         self._validate()
@@ -190,6 +194,12 @@ class CrossrefEmailProcessor:
             if not self.email_fetcher.connect():
                 return False
 
+            # Check the mailbox layout before touching any message, so that
+            # a mis-configured label cannot silently look like a clean week
+            # nor strand processed messages with nowhere to be filed
+            if not self._prepare_folders():
+                return False
+
             # Fetch and process messages
             messages = self.email_fetcher.fetch_messages_from_folders(
                 self.config.source_folders)
@@ -201,8 +211,14 @@ class CrossrefEmailProcessor:
                 if parsed_data:
                     self.csv_writer.write_row(parsed_data)
                     # Move email to checked folder after successful processing
-                    self.email_fetcher.move_message(
-                        msg_uid, source_folder, self.config.checked_folder)
+                    if not self.email_fetcher.move_message(
+                            msg_uid, source_folder,
+                            self.config.checked_folder):
+                        logging.error(
+                            f"Message {msg_uid} was added to the report but "
+                            f"could not be moved out of {source_folder}; it "
+                            f"will be reported again on the next run unless "
+                            f"it is filed manually")
                 else:
                     logging.warning(f"Failed to parse message {msg_uid}, "
                                     f"leaving in {source_folder}")
@@ -221,6 +237,34 @@ class CrossrefEmailProcessor:
             return False
         finally:
             self.email_fetcher.disconnect()
+
+    def _prepare_folders(self) -> bool:
+        """Verify the source folders exist and ensure the checked folder does.
+
+        The Gmail filters create the source labels, but no filter creates the
+        label processed messages are filed under, so that one is created on
+        demand. A missing source label is treated as a hard failure rather
+        than as an empty folder: silently processing nothing would be
+        indistinguishable from a week with no Crossref errors.
+        """
+        missing = [folder for folder in self.config.source_folders
+                   if not self.email_fetcher.folder_exists(folder)]
+        if missing:
+            logging.error(
+                f"Source folder(s) not found on the mail server: "
+                f"{', '.join(missing)}. Check IMAP_SERVER and IMAP_USERNAME, "
+                f"and that these labels exist with exactly these names.")
+            return False
+
+        if not self.email_fetcher.ensure_folder_exists(
+                self.config.checked_folder):
+            logging.error(
+                f"Cannot use destination folder "
+                f"{self.config.checked_folder}. Create this label manually "
+                f"in the mailbox and re-run.")
+            return False
+
+        return True
 
     def _send_report(self):
         """Send email report to Crossref with CSV attachment"""
