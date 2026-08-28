@@ -20,6 +20,24 @@ from urllib.parse import urlparse
 # General constants
 DEFAULT_SMTP_PORT = 587
 IMAP_OK_STATUS = 'OK'
+# Server capabilities we take advantage of when the server advertises them.
+# Gmail advertises both.
+IMAP_MOVE_CAPABILITY = 'MOVE'
+IMAP_UIDPLUS_CAPABILITY = 'UIDPLUS'
+
+
+def quote_mailbox(mailbox: str) -> str:
+    """Return an IMAP-safe quoted form of a mailbox name.
+
+    imaplib does not quote the mailbox arguments it is given, so any name
+    containing an atom-special (most commonly a space) has to be quoted by
+    the caller. Gmail exposes labels as hierarchical mailbox names such as
+    Crossref_submissions/Checked; these happen to be valid unquoted atoms,
+    but quoting unconditionally means a label later renamed to something
+    containing a space cannot silently break SELECT, LIST, CREATE or MOVE.
+    """
+    escaped = mailbox.replace('\\', '\\\\').replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 class EmailFetcher:
@@ -55,43 +73,120 @@ class EmailFetcher:
 
         Handles cleanup even if connection is already closed or errors occur.
         Always sets self.mail to None to prevent reuse of stale connection.
+
+        CLOSE is only issued when a mailbox is actually selected: it is
+        illegal in the authenticated state, and a run that aborts before
+        selecting anything must still be able to log out cleanly.
         """
-        if self.mail:
-            try:
+        if not self.mail:
+            return
+
+        try:
+            if getattr(self.mail, 'state', None) == 'SELECTED':
                 self.mail.close()
-                self.mail.logout()
-                logging.info("IMAP connection closed successfully")
-            except Exception as e:
-                logging.warning(f"Error during IMAP disconnect: {e}")
-            finally:
-                self.mail = None
+        except Exception as e:
+            logging.warning(f"Error closing selected folder: {e}")
+
+        try:
+            self.mail.logout()
+            logging.info("IMAP connection closed successfully")
+        except Exception as e:
+            logging.warning(f"Error during IMAP disconnect: {e}")
+        finally:
+            self.mail = None
+
+    def _server_supports(self, capability: str) -> bool:
+        """Check whether the connected server advertises a capability"""
+        return capability in getattr(self.mail, 'capabilities', ())
+
+    def folder_exists(self, folder: str) -> bool:
+        """Check whether a folder (Gmail label) exists on the server.
+
+        Uses LIST rather than SELECT so the check is side-effect free and
+        leaves the currently selected folder alone.
+        """
+        try:
+            status, data = self.mail.list('""', quote_mailbox(folder))
+        except Exception as e:
+            logging.error(f"Error listing folder {folder}: {e}")
+            return False
+
+        if status != IMAP_OK_STATUS:
+            logging.error(f"Failed to list folder {folder}: {status}")
+            return False
+
+        # A LIST with no matches yields a single empty (None) response line
+        return any(line for line in data)
+
+    def ensure_folder_exists(self, folder: str) -> bool:
+        """Ensure a destination folder (Gmail label) exists, creating it if
+        it does not.
+
+        Gmail's filters create the labels that incoming mail is classified
+        into, but nothing creates the label processed messages are filed
+        under, so it is created on demand. This is idempotent: an existing
+        folder is left untouched, and a folder created concurrently is
+        reported by Gmail as NO [ALREADYEXISTS] and treated as success.
+        """
+        if self.folder_exists(folder):
+            return True
+
+        logging.info(f"Folder {folder} not found, attempting to create it")
+
+        try:
+            status, data = self.mail.create(quote_mailbox(folder))
+        except Exception as e:
+            logging.error(f"Error creating folder {folder}: {e}")
+            return False
+
+        if status == IMAP_OK_STATUS:
+            logging.info(f"Created folder {folder}")
+            return True
+
+        detail = b' '.join(line for line in data if line).decode(
+            'utf-8', 'replace')
+        if 'ALREADYEXISTS' in detail.upper():
+            return True
+
+        logging.error(f"Failed to create folder {folder}: {detail}. "
+                      f"Create this label manually in the mailbox and "
+                      f"re-run.")
+        return False
 
     def move_message(self, msg_uid: str, source_folder: str,
                      destination_folder: str) -> bool:
-        """Move a message from source folder to destination folder using UID"""
+        """Move a message from source folder to destination folder using UID.
+
+        UID MOVE (RFC 6851) is used wherever the server advertises it, which
+        includes Gmail. Under Gmail's IMAP mapping, folders are labels and a
+        MOVE between two labels simply removes the source label and adds the
+        destination one; the underlying message is untouched and remains in
+        All Mail. Crucially it never sets \\Deleted, so Gmail's "when a
+        message is expunged from the last visible IMAP folder" setting -
+        which can archive, bin or permanently delete - is never triggered.
+
+        Servers without MOVE fall back to COPY, then \\Deleted, then expunge.
+        The copy is always verified before the source message is touched, so
+        a failure leaves the message in the source folder. UID EXPUNGE
+        (RFC 4315) is preferred over EXPUNGE where UIDPLUS is advertised,
+        because a bare EXPUNGE removes every \\Deleted message in the folder,
+        not just this one.
+        """
         try:
             # Select the source folder
-            status, _ = self.mail.select(source_folder)
+            status, _ = self.mail.select(quote_mailbox(source_folder))
             if status != IMAP_OK_STATUS:
                 logging.error(f"Failed to select source folder "
                               f"{source_folder}")
                 return False
 
-            # Copy message to destination folder using UID
-            status, _ = self.mail.uid('copy', msg_uid, destination_folder)
-            if status != IMAP_OK_STATUS:
-                logging.error(f"Failed to copy message {msg_uid} to "
-                              f"{destination_folder}")
-                return False
+            if self._server_supports(IMAP_MOVE_CAPABILITY):
+                moved = self._move_via_move(msg_uid, destination_folder)
+            else:
+                moved = self._move_via_copy(msg_uid, destination_folder)
 
-            # Mark original message for deletion using UID
-            status, _ = self.mail.uid('store', msg_uid, '+FLAGS', '\\Deleted')
-            if status != IMAP_OK_STATUS:
-                logging.error(f"Failed to mark message {msg_uid} for deletion")
+            if not moved:
                 return False
-
-            # Expunge to actually delete the message from source folder
-            self.mail.expunge()
 
             logging.info(f"Moved message {msg_uid} from {source_folder} to "
                          f"{destination_folder}")
@@ -100,6 +195,46 @@ class EmailFetcher:
         except Exception as e:
             logging.error(f"Error moving message {msg_uid}: {e}")
             return False
+
+    def _move_via_move(self, msg_uid: str, destination_folder: str) -> bool:
+        """Relocate a message with UID MOVE (preferred; used by Gmail)"""
+        status, data = self.mail.uid('move', msg_uid,
+                                     quote_mailbox(destination_folder))
+        if status != IMAP_OK_STATUS:
+            logging.error(f"Failed to move message {msg_uid} to "
+                          f"{destination_folder}: {data}")
+            return False
+        return True
+
+    def _move_via_copy(self, msg_uid: str, destination_folder: str) -> bool:
+        """Relocate a message with COPY then \\Deleted then expunge.
+
+        Only used against servers that do not advertise MOVE. The source
+        message is only ever flagged once the copy has been confirmed.
+        """
+        # Copy message to destination folder using UID
+        status, data = self.mail.uid('copy', msg_uid,
+                                     quote_mailbox(destination_folder))
+        if status != IMAP_OK_STATUS:
+            logging.error(f"Failed to copy message {msg_uid} to "
+                          f"{destination_folder}: {data}. Leaving message in "
+                          f"place.")
+            return False
+
+        # Mark original message for deletion using UID
+        status, _ = self.mail.uid('store', msg_uid, '+FLAGS', '\\Deleted')
+        if status != IMAP_OK_STATUS:
+            logging.error(f"Failed to mark message {msg_uid} for deletion")
+            return False
+
+        # Expunge to actually remove the message from the source folder,
+        # scoped to this UID where the server supports it
+        if self._server_supports(IMAP_UIDPLUS_CAPABILITY):
+            self.mail.uid('expunge', msg_uid)
+        else:
+            self.mail.expunge()
+
+        return True
 
     def fetch_messages_from_folders(self, folders: List[str]) -> List[tuple]:
         """Fetch all messages from specified folders"""
@@ -118,7 +253,7 @@ class EmailFetcher:
         logging.info(f"Reading emails in {folder}")
 
         # Select folder
-        status, folder_messages = self.mail.select(folder)
+        status, folder_messages = self.mail.select(quote_mailbox(folder))
         if status != IMAP_OK_STATUS:
             logging.error(f"Failed to select {folder}: {status}")
             return messages
