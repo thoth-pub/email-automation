@@ -28,12 +28,13 @@ email_automator.py          # Main orchestrator and CLI entry point
 
 ### Crossref Error Reports
 Processes Crossref submission error emails and generates monthly reports:
-- Fetches error emails from designated IMAP folders
+- Fetches error emails from designated IMAP folders (Gmail labels, see
+  [Mailbox configuration](#mailbox-configuration))
 - Parses XML content to extract submission details
 - Enriches data with Thoth API information (DOI, title, subtitle)
 - Generates CSV reports with comprehensive error details
 - Emails reports to Crossref
-- Moves processed emails to Checked folder
+- Moves processed emails to the Checked label
 
 ## 🛠️ Setup
 
@@ -41,28 +42,96 @@ Processes Crossref submission error emails and generates monthly reports:
 
 Create a `config.env` file (for local development):
 ```env
-# IMAP Configuration
-IMAP_SERVER=your.imap.server.com
+# IMAP Configuration (inbound mail: Google Workspace)
+# Production reads from distribution@thoth.pub; see GitHub Secrets below
+IMAP_SERVER=imap.gmail.com
 IMAP_USERNAME=your.email@domain.com
-IMAP_PASSWORD=your_password
+IMAP_PASSWORD=your_app_password
 
-# SMTP Configuration  
+# SMTP Configuration (outbound mail: unrelated to IMAP, see below)
 THOTH_SMTP=smtp://username:password@smtp.server.com:587
 
 # Recipient (for Crossref workflow)
 CROSSREF_EMAIL=crossref@example.com
 ```
 
+`config.env` is git-ignored. Never commit real usernames, passwords or app
+passwords to this repository.
+
 ### 2. GitHub Secrets (for production)
 
 Configure these secrets in the repository:
-- `IMAP_SERVER`
-- `IMAP_USERNAME` 
-- `IMAP_PASSWORD`
+- `IMAP_SERVER` — `imap.gmail.com`
+- `IMAP_USERNAME` — `distribution@thoth.pub`, the dedicated Google
+  Workspace mailbox that receives Crossref mail
+- `IMAP_PASSWORD` — a Google Workspace **app password** for that mailbox
+  (a normal account password will not work over IMAP)
 - `THOTH_SMTP`
 - `CROSSREF_EMAIL`
 
-### 3. Dependencies
+IMAP must be enabled on the Google Workspace mailbox, and the account needs
+2-Step Verification in order for an app password to be issued.
+
+#### Inbound (IMAP) and outbound (SMTP) are independent
+
+`IMAP_SERVER` / `IMAP_USERNAME` / `IMAP_PASSWORD` control **only** where
+error reports are read from. Outbound mail is sent entirely separately via
+`THOTH_SMTP`, which is unaffected by the mailbox provider and is not part of
+the Google Workspace migration. Changing the IMAP settings does not require
+any change to `THOTH_SMTP`.
+
+### 3. Mailbox configuration
+
+Inbound mail is hosted on Google Workspace (previously Fastmail).
+
+Production Crossref processing runs against the dedicated
+`distribution@thoth.pub` mailbox. Crossref deposits already name
+distribution@thoth.pub as the depositor email, so error reports arrive there
+and are classified there by the Gmail filters. The mail is deliberately not
+forwarded on to info@thoth.pub: the old distribution@ → info@ forwarding
+arrangement is not recreated under Google Workspace.
+
+Gmail exposes labels to IMAP as folders, with `/` separating levels of the
+hierarchy. The canonical labels used by the Crossref automation, all within
+the distribution@thoth.pub mailbox, are:
+
+| Purpose | Label |
+| --- | --- |
+| Source: ISBN errors | `Crossref_submissions/Error_reports/ISBN_already_assigned` |
+| Source: ISSN errors | `Crossref_submissions/Error_reports/ISSN_already_assigned` |
+| Destination: processed | `Crossref_submissions/Checked` |
+
+The two source labels are applied by Gmail filters as Crossref messages
+arrive. `Crossref_submissions/Checked` has no incoming filter, so the
+automation creates it on demand if it is missing; it can equally be created
+by hand in Gmail beforehand.
+
+Before processing anything, each run checks that the source labels exist and
+that the Checked label exists or can be created. A missing source label
+fails the run with an explicit message rather than silently reporting no
+errors.
+
+> **Legacy labels.** The Fastmail migration imported the old folder
+> hierarchy into Gmail as literal labels prefixed with `INBOX/`, for example
+> `INBOX/Crossref_submissions/Error_reports/ISBN_already_assigned`. These
+> hold historical mail only. They are deliberately **not** used by the
+> automation, so that a backlog of migrated messages is never reprocessed.
+
+#### Moving processed messages
+
+Where the server advertises `MOVE` (Gmail does), processed messages are
+relocated with `UID MOVE`. Under Gmail this removes the source label and
+adds `Crossref_submissions/Checked`; the underlying message is untouched and
+remains in All Mail. No `\Deleted` flag is ever set, so Gmail's "when a
+message is expunged from the last visible IMAP folder" setting — which can
+archive, bin or permanently delete — is never triggered.
+
+Servers without `MOVE` fall back to `COPY`, then `\Deleted`, then expunge.
+The copy is always confirmed before the source message is touched, so a
+failure leaves the message in its source label to be retried on the next
+run.
+
+### 4. Dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -75,6 +144,15 @@ pip install -r requirements.txt
 ```bash
 # Run Crossref automation
 python email_automator.py --automation Crossref
+```
+
+### Tests
+
+The test suite uses only the standard library and never contacts a real
+mail server, so it needs no credentials and no network access:
+
+```bash
+python -m unittest discover -v
 ```
 
 ### GitHub Actions
@@ -95,6 +173,8 @@ email-automation/
 ├── email_automator.py                # Main CLI orchestrator
 ├── crossref_error_report.py          # Crossref automation logic
 ├── email_utils.py                    # Reusable email utilities
+├── test_crossref_error_report.py     # Tests for the Crossref automation
+├── test_email_utils.py               # Tests for the IMAP/SMTP utilities
 ├── .github/workflows/
 │   ├── email_automate.yml            # Reusable workflow template
 │   └── crossref-error-report.yml     # Crossref scheduler
